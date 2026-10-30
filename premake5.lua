@@ -18,6 +18,7 @@ local function FindVcpkg()
 end
 
 local RepoRoot = _MAIN_SCRIPT_DIR
+local FbxSdkRoot = "C:/Program Files/Autodesk/FBX/FBX SDK/2020.3.11"
 if _ACTION and _ACTION:match("^vs") and not os.isdir(RepoRoot .. "/vcpkg_installed/x64-windows/lib") then
 	local Vcpkg = FindVcpkg()
 	if Vcpkg then
@@ -167,6 +168,47 @@ project "HitoriEngine"
 	location "Source/Runtime"
 	kind     "StaticLib"
 	CommonSettings()
+
+	includedirs
+	{
+		FbxSdkRoot .. "/include",
+	}
+
+	defines
+	{
+		"FBXSDK_SHARED",
+	}
+
+		links
+	{
+		"libfbxsdk",
+	}
+
+	filter "configurations:Debug or Benchmark_Debug"
+		libdirs
+		{
+			FbxSdkRoot .. "/lib/x64/debug",
+		}
+
+		postbuildcommands
+		{
+			'{COPYFILE} "' .. FbxSdkRoot
+				.. '/lib/x64/debug/libfbxsdk.dll" "%{cfg.targetdir}/libfbxsdk.dll"',
+		}
+
+	filter "configurations:Release or Benchmark or ObjViewer or Executable"
+		libdirs
+		{
+			FbxSdkRoot .. "/lib/x64/release",
+		}
+
+		postbuildcommands
+		{
+			'{COPYFILE} "' .. FbxSdkRoot
+				.. '/lib/x64/release/libfbxsdk.dll" "%{cfg.targetdir}/libfbxsdk.dll"',
+		}
+
+	filter {}
 
 	pchheader "EnginePCH.h"
 	pchsource "Source/Runtime/EnginePCH.cpp"
