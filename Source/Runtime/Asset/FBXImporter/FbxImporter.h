@@ -1,8 +1,16 @@
 #pragma once
 
 #include "EnginePCH.h"
+#include "Render/Vertex.h"
 
 #include <fbxsdk.h>
+
+struct FFbxMeshInfo
+{
+	FString Path;
+	TArray<FVertex> Vertices;
+	TArray<uint32> Indices;
+};
 
 class FFbxImporter
 {
