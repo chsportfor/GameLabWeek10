@@ -35,23 +35,23 @@ void FFbxImporter::ImportFBX(const FString& Path, const FString& SceneName)
 
 void FFbxImporter::ProcessNode(FbxNode* Node)
 {
-	const char* pNodeName = Node->GetName();
-	for (int i = 0; i < Node->GetNodeAttributeCount(); i++)
+	const char* pNodeName = Node->GetName();	// Node 이름 저장
+	for (int i = 0; i < Node->GetNodeAttributeCount(); i++)	// 한 Node에 여러 Attribute가 있을 수 있으므로 전체를 순회
 	{
 		FbxNodeAttribute* NodeAttri = Node->GetNodeAttributeByIndex(i);
-		if (NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eMesh)
+		if (NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eMesh)	// Mesh 일경우 FbxMesh로 Cast 후 ProcessMesh
 		{
 			FbxMesh* Mesh = static_cast<FbxMesh*>(NodeAttri);
 			ProcessMesh(Node, Mesh);
 		}
-		else if (NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eSkeleton)
+		else if (NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eSkeleton)	// Skeleton 일경우 FbxSkeleton로 Cast 후 ProcessSkeleton
 		{
 			FbxSkeleton* Skeleton = static_cast<FbxSkeleton*>(NodeAttri);
 			ProcessSkeleton(Node, Skeleton);
 		}
 		else
 		{
-			ProcessEtc(Node);
+			ProcessEtc(Node);	// 그외의 경우 ProcessEtc
 		}
 	}
 }
