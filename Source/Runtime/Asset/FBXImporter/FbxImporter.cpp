@@ -13,8 +13,9 @@ FFbxImporter::~FFbxImporter()
 	pFbxManager->Destroy();
 }
 
-void FFbxImporter::ImportFBX(const FString& Path, const FString& SceneName)
+FFbxImportResult FFbxImporter::ImportFBX(const FString& Path, const FString& SceneName)
 {
+	FFbxImportResult FbxResult;
 	FbxImporter* pFbxImporter = FbxImporter::Create(pFbxManager, "");	// FbxImporter 객체 생성
 	FbxIOSettings* pFbxIOSetting = pFbxManager->GetIOSettings(); 
 	pFbxImporter->Initialize(Path.c_str(),-1,pFbxIOSetting);	// FbxImporter 초기 Initialize
@@ -35,12 +36,13 @@ void FFbxImporter::ImportFBX(const FString& Path, const FString& SceneName)
 	{
 		for (int i = 0; i < pFbxRootNode->GetChildCount(); i++)	// RootNode 내려가면서 정보 읽어서 Parsing
 		{
-			ProcessNode(pFbxRootNode->GetChild(i));
+			ProcessNode(pFbxRootNode->GetChild(i), FbxResult);
 		}
 	}
+	return FbxResult;
 }
 
-void FFbxImporter::ProcessNode(FbxNode* Node)
+void FFbxImporter::ProcessNode(FbxNode* Node, FFbxImportResult& OutResult)
 {
 	const char* pNodeName = Node->GetName();	// Node 이름 저장
 	for (int i = 0; i < Node->GetNodeAttributeCount(); i++)	// 한 Node에 여러 Attribute가 있을 수 있으므로 전체를 순회
@@ -49,7 +51,9 @@ void FFbxImporter::ProcessNode(FbxNode* Node)
 		if (NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eMesh)	// Mesh 일경우 FbxMesh로 Cast 후 ProcessMesh
 		{
 			FbxMesh* Mesh = static_cast<FbxMesh*>(NodeAttri);
-			ProcessMesh(Node, Mesh);
+			FFbxMeshInfo FbxMeshInfo = ProcessMesh(Node, Mesh);
+			OutResult.Meshes.Add(FbxMeshInfo);
+			
 		}
 		else if (NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eSkeleton)	// Skeleton 일경우 FbxSkeleton로 Cast 후 ProcessSkeleton
 		{
@@ -68,32 +72,54 @@ void FFbxImporter::ProcessNode(FbxNode* Node)
 	} 
 }
 
-void FFbxImporter::ProcessMesh(FbxNode* Node, FbxMesh* Mesh)
+FFbxMeshInfo FFbxImporter::ProcessMesh(FbxNode* Node, FbxMesh* Mesh)
 {
 	FFbxMeshInfo MeshInfo;
-	for (int i = 0; i < Mesh->GetPolygonCount(); i++)	// 전체 삼각형 개수에 대하여 순회
+	FbxStringList UVSetNames;
+	Mesh->GetUVSetNames(UVSetNames);                  // UV 추출을 위한 UVSet 이름 넣어두기
+	TMap<FFbxIndex, int32, FFbxIndexHash> pFbxCache;  // 동일한 정점 체크를 위해서 사용할 Map 생성, 빠른 계산을 위해 Hash 사용
+	for (int i = 0; i < Mesh->GetPolygonCount(); i++)	// 전체 삼각형 개수에 대하여 순회, Import 과정에서 삼각형화 했으므로 전체 Polygon은 다 삼각형
 	{
-		FbxStringList UVSetNames;
-		Mesh->GetUVSetNames(UVSetNames);
 		if (Mesh->GetPolygonSize(i) == 3)
 		{
 			for (int j = 0; j < 3; j++)
 			{
 				int VertexIndex = Mesh->GetPolygonVertex(i, j);
-				FbxVector4 FbxVertex = Mesh->GetControlPointAt(VertexIndex);
-				FVertex Vertex;
-				FbxVector4 Normal;
-				FbxVector2 UV;
-				bool bUnmapped = false;
-				Mesh->GetPolygonVertexNormal(i, j, Normal);
-				Mesh->GetPolygonVertexUV(i, j, UVSetNames.GetStringAt(0), UV, bUnmapped);
-				Vertex.Position = FVector(static_cast<float>(FbxVertex[0]), static_cast<float>(FbxVertex[1]), static_cast<float>(FbxVertex[2]));
-				Vertex.Normal = FVector(static_cast<float>(Normal[0]), static_cast<float>(Normal[1]), static_cast<float>(Normal[2]));
-				Vertex.UV = FVector2(static_cast<float>(UV[0]),static_cast<float>(UV[1]));
-				MeshInfo.Vertices.Add(Vertex);
+				FbxVector4 FbxVertex = Mesh->GetControlPointAt(VertexIndex);	// i번째 Polygon의 j번째 점 Vertex 가져옴
+				FVertex Vertex;		
+				Vertex.Position = FVector(static_cast<float>(FbxVertex[0]), static_cast<float>(FbxVertex[1]), static_cast<float>(FbxVertex[2]));	// Vertex의 Position에 정점 좌표 대입
+
+				FbxVector4 Normal;	
+				bool bNormal = Mesh->GetPolygonVertexNormal(i, j, Normal); // i번째 Polygon의 j번째 점 Normal 가져옴
+				if(bNormal) Vertex.Normal = FVector(static_cast<float>(Normal[0]), static_cast<float>(Normal[1]), static_cast<float>(Normal[2]));	// Vertex의 Normal에 값 대입
+
+				if (UVSetNames.GetCount() > 0)	// UVSet이 존재할때 체크
+				{
+					FbxVector2 UV;
+					bool bUnmapped = false;
+					bool bSuccess = Mesh->GetPolygonVertexUV( i, j, UVSetNames.GetStringAt(0), UV, bUnmapped); // i번째 Polygon의 j번째 점 UV 가져옴
+					if (bSuccess && !bUnmapped)	// Mapping된 UV를 잘 가져왔을때만 UV대입
+					{
+						Vertex.UV = FVector2(static_cast<float>(UV[0]), static_cast<float>(UV[1]));	
+					}
+				}
+
+				FFbxIndex Key{VertexIndex,Vertex.Normal.X,Vertex.Normal.Y,Vertex.Normal.Z,Vertex.UV.X,Vertex.UV.Y}; // 현재 코드에서 얻은 Control Point 번호, Vertex 정보를 바탕으로 키 생성
+				if (const int32* Found = pFbxCache.Find(Key))
+				{
+					MeshInfo.Indices.Add(static_cast<uint32>(*Found));	// Position, Normal, UV가 다 겹치는 경우에는 동일한 정점이므로 Indices에만 추가
+				} 
+				else   // 그렇지 않은 경우에는 다른 정점으로 처리, Cache에 추가
+				{
+					uint32 NewVertexIndex = static_cast<uint32>(MeshInfo.Vertices.Num());
+					MeshInfo.Vertices.Add(Vertex);
+					MeshInfo.Indices.Add(NewVertexIndex);
+					pFbxCache.Add(Key, static_cast<int32>(NewVertexIndex));
+				}
 			}
 		}
 	}
+	return MeshInfo;
 }
 
 void FFbxImporter::ProcessSkeleton(FbxNode* Node, FbxSkeleton* Skeleton)
