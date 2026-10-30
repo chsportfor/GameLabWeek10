@@ -1,6 +1,6 @@
 #include "EnginePCH.h"
 
-class FSkeletalMeshData
+class USkeletalMeshData
 {
 
 };
