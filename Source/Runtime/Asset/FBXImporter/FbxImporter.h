@@ -7,24 +7,33 @@
 
 #include <fbxsdk.h>
 
+struct FFbxBoneInfluence
+{
+	int32 BoneIndex = -1;
+	float Weight = 0.0f;
+};
+
 struct FFbxMeshInfo	// Fbx에서 Mesh의 정점, index 정보를 담는 구조체
 {
 	FString Path;
 	TArray<FVertex> Vertices;
 	TArray<uint32> Indices;
+	TMap<int32, TArray<FFbxBoneInfluence>> VertexInfluence;
+};
+
+struct FFbxBoneInfo // Fbx에서 Bone의 이름, 부모 Index를 담는 구조체
+{
+	FString BoneName;
+	int32 ParentIndex = -1;
+	FTransform RefTransform;
 };
 
 struct FFbxSkeletalMeshInfo // Fbx에서 SkeletalMesh의 Bone 정보, Reference Pose의 Transform 정보를 담는 구조체
 {
 	TArray<FFbxBoneInfo> BoneInfoArray;
-	TArray<FTransform> RefTransfromArray;
 };
 
-struct FFbxBoneInfo	// Fbx에서 Bone의 이름, 부모 Index를 담는 구조체
-{
-	FString BoneName;
-	uint32 ParentIndex=-1;
-};
+
 
 struct FFbxIndex	// 중복 정점 체크에 사용되는 Key 값
 {
@@ -57,7 +66,7 @@ struct FFbxIndexHash	// Key 검사 빠르게 진행하기 위한 Hash
 struct FFbxImportResult	// Fbx의 Import 결과로 나오는 값 구조체
 {
 	TArray<FFbxMeshInfo> Meshes;
-	TArray<FFbxSkeletalMeshInfo> SkeletalMeshes;
+	FFbxSkeletalMeshInfo SkeletalMeshes;
 };
 
 
@@ -68,9 +77,9 @@ public:
 	FFbxImporter();
 	~FFbxImporter();
 	FFbxImportResult ImportFBX(const FString& Path, const FString& SceneName);
-	void ProcessNode(FbxNode* Node, FFbxImportResult& OutResult);
+	void ProcessNode(FbxNode* Node, TMap<FbxNode*, int32>& ParentMap, FFbxImportResult & OutResult);
 	FFbxMeshInfo ProcessMesh(FbxNode* Node, FbxMesh* Mesh);
-	FFbxSkeletalMeshInfo ProcessSkeleton(FbxNode* Node, FbxSkeleton* Skeleton);
+	FFbxBoneInfo ProcessSkeleton(FbxNode* Node, FbxSkeleton* Skeleton, TMap<FbxNode*, int32>& ParentMap);
 	void ProcessEtc(FbxNode* Node);
 	void Cook(const FFbxMeshInfo& RawMesh, const FFbxSkeletalMeshInfo& RawBone, FSkeletalMeshData& Out);
 

@@ -28,49 +28,49 @@ FFbxImportResult FFbxImporter::ImportFBX(const FString& Path, const FString& Sce
 	{
 		return;
 	}
-	
 	pFbxImporter->Destroy();	// 다 채웠으므로 Importer는 Destroy
+	TMap<FbxNode*, int32> ParentMap;
 
 	FbxNode* pFbxRootNode = pFbxScene->GetRootNode();
 	if (pFbxRootNode)
 	{
 		for (int i = 0; i < pFbxRootNode->GetChildCount(); i++)	// RootNode 내려가면서 정보 읽어서 Parsing
 		{
-			ProcessNode(pFbxRootNode->GetChild(i), FbxResult);
+			ProcessNode(pFbxRootNode->GetChild(i), ParentMap, FbxResult);
 		}
 	}
 	return FbxResult;
 }
 
-void FFbxImporter::ProcessNode(FbxNode* Node, FFbxImportResult& OutResult)
+void FFbxImporter::ProcessNode(FbxNode* Node, TMap<FbxNode*, int32>& ParentMap, FFbxImportResult& OutResult)
 {
-	const char* pNodeName = Node->GetName();	// Node 이름 저장
-	for (int i = 0; i < Node->GetNodeAttributeCount(); i++)	// 한 Node에 여러 Attribute가 있을 수 있으므로 전체를 순회
+	const char* pNodeName = Node->GetName();                // Node 이름 저장
+	for (int i = 0; i < Node->GetNodeAttributeCount(); i++) // 한 Node에 여러 Attribute가 있을 수 있으므로 전체를 순회
 	{
 		FbxNodeAttribute* NodeAttri = Node->GetNodeAttributeByIndex(i);
-		if (NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eMesh)	// Mesh 일경우 FbxMesh로 Cast 후 ProcessMesh
+		if (NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eMesh) // Mesh 일경우 FbxMesh로 Cast 후 ProcessMesh
 		{
 			FbxMesh* Mesh = static_cast<FbxMesh*>(NodeAttri);
 			FFbxMeshInfo FbxMeshInfo = ProcessMesh(Node, Mesh);
 			OutResult.Meshes.Add(FbxMeshInfo);
-			
 		}
-		else if (NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eSkeleton)	// Skeleton 일경우 FbxSkeleton로 Cast 후 ProcessSkeleton
+		else if (NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eSkeleton) // Skeleton 일경우 FbxSkeleton로 Cast 후 ProcessSkeleton
 		{
 			FbxSkeleton* Skeleton = static_cast<FbxSkeleton*>(NodeAttri);
-			FFbxSkeletalMeshInfo FbxSkeletalMeshInfo = ProcessSkeleton(Node, Skeleton);
-			OutResult.SkeletalMeshes.Add(FbxSkeletalMeshInfo);
+			FFbxBoneInfo FbxSkeletalMeshInfo = ProcessSkeleton(Node, Skeleton, ParentMap);
+			ParentMap.Add(Node, OutResult.SkeletalMeshes.BoneInfoArray.Num());
+			OutResult.SkeletalMeshes.BoneInfoArray.Add(FbxSkeletalMeshInfo);
 		}
 		else
 		{
-			ProcessEtc(Node);	// 그외의 경우 ProcessEtc
+			ProcessEtc(Node); // 그외의 경우 ProcessEtc
 		}
 	}
 
-	for (int i = 0; i < Node->GetChildCount(); ++i)	// 연결된 자식에 대해서 재귀적으로 순회
+	for (int i = 0; i < Node->GetChildCount(); ++i) // 연결된 자식에 대해서 재귀적으로 순회
 	{
-		ProcessNode(Node->GetChild(i),OutResult);
-	} 
+		ProcessNode(Node->GetChild(i), ParentMap, OutResult);
+	}
 }
 
 FFbxMeshInfo FFbxImporter::ProcessMesh(FbxNode* Node, FbxMesh* Mesh)
@@ -117,16 +117,23 @@ FFbxMeshInfo FFbxImporter::ProcessMesh(FbxNode* Node, FbxMesh* Mesh)
 					MeshInfo.Indices.Add(NewVertexIndex);
 					pFbxCache.Add(Key, static_cast<int32>(NewVertexIndex));
 				}
+				// To-Do : VertexInfluence 계산값을 MeshInfo에 추가
+
 			}
 		}
 	}
 	return MeshInfo;
 }
 
-FFbxSkeletalMeshInfo FFbxImporter::ProcessSkeleton(FbxNode* Node, FbxSkeleton* Skeleton)
+FFbxBoneInfo FFbxImporter::ProcessSkeleton(FbxNode* Node, FbxSkeleton* Skeleton, TMap<FbxNode*, int32>& ParentMap)
 {
-	FFbxSkeletalMeshInfo SkeletalInfo;
-	return SkeletalInfo;
+	FFbxBoneInfo BoneInfo;
+	BoneInfo.BoneName = Node->GetName();
+	FbxNode* ParentNode = Node->GetParent();
+	const int32* Found = ParentMap.Find(ParentNode);
+	BoneInfo.ParentIndex = Found ? *Found : -1;
+	BoneInfo.RefTransform;
+	return BoneInfo;
 }
 
 void FFbxImporter::ProcessEtc(FbxNode* Node)
