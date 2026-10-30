@@ -3,6 +3,7 @@
 #include "Asset/RenderAsset.h"
 #include "Render/Buffer.h"
 #include "Render/StaticMeshData.h"
+#include "Render/SkeletalMeshData.h"
 #include "Render/MeshRenderData.h"
 #include <unordered_map>
 #include <vector>
@@ -77,4 +78,20 @@ private:
     FBox RenderBounds;
     std::unordered_map<std::vector<UMaterial*>, TWeakPtr<const FMeshRenderState>, FMaterialSlotsHash> RenderStates;
     TArray<FPrimitiveSceneProxy*> RenderProxies;
+};
+
+class USkeletalMesh : public URenderAsset
+{
+	DECLARE_CLASS(USkeletalMesh, URenderAsset)
+
+public:
+
+	FSkeletalMeshData MeshData;
+	TUniquePtr<FVertexBuffer> VertexBuffer;
+	TUniquePtr<FIndexBuffer> IndexBuffer;
+
+    const FSkeletalMeshData& GetMeshData() const { return MeshData; }
+
+private:
+	
 };
