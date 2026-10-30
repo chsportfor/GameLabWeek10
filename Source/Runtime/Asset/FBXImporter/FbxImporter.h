@@ -11,6 +11,9 @@ public:
 	~FFbxImporter();
 	void ImportFBX(const FString& Path, const FString& SceneName);
 	void ProcessNode(FbxNode* ChildNode);
+	void ProcessMesh(FbxNode* Node, FbxMesh* Mesh);
+	void ProcessSkeleton(FbxNode* Node, FbxSkeleton* Skeleton);
+	void ProcessEtc(FbxNode* Node);
 
 private:
 	FbxManager* pFbxManager;
