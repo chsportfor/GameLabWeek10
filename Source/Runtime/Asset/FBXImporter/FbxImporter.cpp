@@ -68,7 +68,7 @@ void FFbxImporter::ProcessNode(FbxNode* Node, FFbxImportResult& OutResult)
 
 	for (int i = 0; i < Node->GetChildCount(); ++i)	// 연결된 자식에 대해서 재귀적으로 순회
 	{
-		ProcessNode(Node->GetChild(i));
+		ProcessNode(Node->GetChild(i),OutResult);
 	} 
 }
 
@@ -98,7 +98,7 @@ FFbxMeshInfo FFbxImporter::ProcessMesh(FbxNode* Node, FbxMesh* Mesh)
 					FbxVector2 UV;
 					bool bUnmapped = false;
 					bool bSuccess = Mesh->GetPolygonVertexUV( i, j, UVSetNames.GetStringAt(0), UV, bUnmapped); // i번째 Polygon의 j번째 점 UV 가져옴
-					if (bSuccess && !bUnmapped)	// Mapping된 UV를 잘 가져왔을때만 UV대입
+					if (bSuccess && !bUnmapped)	// Mapping된 UV를 잘 가져왔을때만 UV 대입
 					{
 						Vertex.UV = FVector2(static_cast<float>(UV[0]), static_cast<float>(UV[1]));	
 					}
@@ -124,7 +124,7 @@ FFbxMeshInfo FFbxImporter::ProcessMesh(FbxNode* Node, FbxMesh* Mesh)
 
 void FFbxImporter::ProcessSkeleton(FbxNode* Node, FbxSkeleton* Skeleton)
 {
-
+	
 }
 
 void FFbxImporter::ProcessEtc(FbxNode* Node)
