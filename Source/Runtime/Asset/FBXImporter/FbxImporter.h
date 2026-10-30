@@ -65,6 +65,8 @@ struct FFbxIndexHash	// Key 검사 빠르게 진행하기 위한 Hash
 
 struct FFbxImportResult	// Fbx의 Import 결과로 나오는 값 구조체
 {
+	bool bSuccess = false;
+
 	TArray<FFbxMeshInfo> Meshes;
 	FFbxSkeletalMeshInfo SkeletalMeshes;
 };
@@ -84,5 +86,5 @@ public:
 	void Cook(const FFbxMeshInfo& RawMesh, const FFbxSkeletalMeshInfo& RawBone, FSkeletalMeshData& Out);
 
 private:
-	FbxManager* pFbxManager;
+	FbxManager* pFbxManager = nullptr;
 }; 

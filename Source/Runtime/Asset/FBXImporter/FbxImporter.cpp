@@ -4,41 +4,104 @@
 FFbxImporter::FFbxImporter()
 {
 	pFbxManager = FbxManager::Create();	// FbxManager 생성
+	if (!pFbxManager)
+	{
+		HTR_LOG(Error, "[FBX] Manager Create Failed");
+		return;
+	}
+
 	FbxIOSettings* FBXSetting =  FbxIOSettings::Create(pFbxManager, IOSROOT);	// 설정 Root 이름 세팅 후 IOSetting 객체 생성
+	if (!FBXSetting)
+	{
+		HTR_LOG(Error, "[FBX] IOSettings Create Failed");
+		pFbxManager->Destroy();
+		pFbxManager = nullptr;
+		return;
+	}
+
 	pFbxManager->SetIOSettings(FBXSetting);	// FbxManager에 IOSetting 설정
 }
 
 FFbxImporter::~FFbxImporter()
 {
-	pFbxManager->Destroy();
+	if (pFbxManager)
+	{
+		pFbxManager->Destroy();
+	}
 }
 
 FFbxImportResult FFbxImporter::ImportFBX(const FString& Path, const FString& SceneName)
 {
 	FFbxImportResult FbxResult;
-	FbxImporter* pFbxImporter = FbxImporter::Create(pFbxManager, "");	// FbxImporter 객체 생성
-	FbxIOSettings* pFbxIOSetting = pFbxManager->GetIOSettings(); 
-	pFbxImporter->Initialize(Path.c_str(),-1,pFbxIOSetting);	// FbxImporter 초기 Initialize
-	FbxGeometryConverter Converter(pFbxManager);	// Polygon 삼각형화 하기 위한 Geometry Converter
+	if (!pFbxManager)
+	{
+		HTR_LOG(Error, "[FBX] Manager Is Not Ready: {}", Path);
+		return FbxResult;
+	}
 
+	FbxIOSettings* pFbxIOSetting = pFbxManager->GetIOSettings();
+	if (!pFbxIOSetting)
+	{
+		HTR_LOG(Error, "[FBX] IOSettings Is Not Ready: {}", Path);
+		return FbxResult;
+	}
+
+	FbxImporter* pFbxImporter = FbxImporter::Create(pFbxManager, "");	// FbxImporter 객체 생성
+	if (!pFbxImporter)
+	{
+		HTR_LOG(Error, "[FBX] Importer Create Failed: {}", Path);
+		return FbxResult;
+	}
+
+	bool bInitialized = pFbxImporter->Initialize(Path.c_str(), -1, pFbxIOSetting); // FbxImporter 초기 Initialize
+	if (!bInitialized)
+	{
+		HTR_LOG(Error, "[FBX] Importer Initialize Failed: {}", pFbxImporter->GetStatus().GetErrorString());
+		pFbxImporter->Destroy();
+		return FbxResult;
+	}                          
+
+	FbxGeometryConverter Converter(pFbxManager);	// Polygon 삼각형화 하기 위한 Geometry Converter
 	FbxScene* pFbxScene = FbxScene::Create(pFbxManager, SceneName.c_str()); // FbxScene 객체 생성
-	pFbxImporter->Import(pFbxScene);   // FbxImporter Initialize의 파일에서 Scene 정보 가져와 pbxScene에 채움
+	if (!pFbxScene)
+	{
+		HTR_LOG(Error, "[FBX] Scene Create Failed: {}", Path);
+		pFbxImporter->Destroy();
+		return FbxResult;
+	}
+
+	bool bImport = pFbxImporter->Import(pFbxScene);  // FbxImporter Initialize의 파일에서 Scene 정보 가져와 pbxScene에 채움                    
+	if (!bImport)
+	{
+		HTR_LOG(Error, "[FBX] Import Failed: {}", pFbxImporter->GetStatus().GetErrorString());
+		pFbxImporter->Destroy();
+		pFbxScene->Destroy();
+		return FbxResult;
+	}      
+
 	bool bTriangulated = Converter.Triangulate(pFbxScene, true);	// 삼각형화 진행
 	if (!bTriangulated)
 	{
-		return;
+		HTR_LOG(Error, "[FBX] Triangulate Failed");
+		pFbxImporter->Destroy();
+		pFbxScene->Destroy();
+		return FbxResult;
 	}
-	pFbxImporter->Destroy();	// 다 채웠으므로 Importer는 Destroy
-	TMap<FbxNode*, int32> ParentMap;
 
+	pFbxImporter->Destroy();	// 다 채웠으므로 Importer는 Destroy
+
+	TMap<FbxNode*, int32> ParentMap;
 	FbxNode* pFbxRootNode = pFbxScene->GetRootNode();
+
 	if (pFbxRootNode)
 	{
-		for (int i = 0; i < pFbxRootNode->GetChildCount(); i++)	// RootNode 내려가면서 정보 읽어서 Parsing
+		for (int i = 0; i < pFbxRootNode->GetChildCount(); i++)	// RootNode 내려가면서 정보 읽어서 Import
 		{
 			ProcessNode(pFbxRootNode->GetChild(i), ParentMap, FbxResult);
 		}
 	}
+	pFbxScene->Destroy();
+	FbxResult.bSuccess = true;
 	return FbxResult;
 }
 
