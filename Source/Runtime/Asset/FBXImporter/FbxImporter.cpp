@@ -58,7 +58,8 @@ void FFbxImporter::ProcessNode(FbxNode* Node, FFbxImportResult& OutResult)
 		else if (NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eSkeleton)	// Skeleton 일경우 FbxSkeleton로 Cast 후 ProcessSkeleton
 		{
 			FbxSkeleton* Skeleton = static_cast<FbxSkeleton*>(NodeAttri);
-			ProcessSkeleton(Node, Skeleton);
+			FFbxSkeletalMeshInfo FbxSkeletalMeshInfo = ProcessSkeleton(Node, Skeleton);
+			OutResult.SkeletalMeshes.Add(FbxSkeletalMeshInfo);
 		}
 		else
 		{
@@ -122,12 +123,18 @@ FFbxMeshInfo FFbxImporter::ProcessMesh(FbxNode* Node, FbxMesh* Mesh)
 	return MeshInfo;
 }
 
-void FFbxImporter::ProcessSkeleton(FbxNode* Node, FbxSkeleton* Skeleton)
+FFbxSkeletalMeshInfo FFbxImporter::ProcessSkeleton(FbxNode* Node, FbxSkeleton* Skeleton)
 {
-	
+	FFbxSkeletalMeshInfo SkeletalInfo;
+	return SkeletalInfo;
 }
 
 void FFbxImporter::ProcessEtc(FbxNode* Node)
+{
+
+}
+
+void FFbxImporter::Cook(const FFbxMeshInfo& RawMesh, const FFbxSkeletalMeshInfo& RawBone, FSkeletalMeshData& Out)
 {
 
 }
