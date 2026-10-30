@@ -212,6 +212,51 @@ namespace
 		ImGui::PopID();
 	}
 
+	void DrawTextureProperty(UTexture2D** TexturePtr)
+	{
+		const float ThumbnailSize = 64.0f;
+
+		UTexture2D* Texture = *TexturePtr;
+
+		ImGui::PushID(TexturePtr);
+
+		if (Texture && Texture->GetResource())
+		{
+			ImGui::Image(
+				(ImTextureID)Texture->GetResource()->GetSRV(),
+				{ ThumbnailSize, ThumbnailSize });
+		}
+		else
+		{
+			ImGui::Button("Empty", { ThumbnailSize, ThumbnailSize });
+		}
+
+		if (ImGui::BeginDragDropTarget())
+		{
+			if (const ImGuiPayload* Payload = ImGui::AcceptDragDropPayload(EditorDragDrop::Texture))
+			{
+				Texture = *static_cast<UTexture2D**>(Payload->Data);
+				*TexturePtr = Texture;
+			}
+			ImGui::EndDragDropTarget();
+		}
+
+		ImGui::SameLine();
+
+		ImGui::BeginGroup();
+		if (Texture)
+		{
+			ImGui::TextWrapped("%s", Texture->GetPath().c_str());
+		}
+		else
+		{
+			ImGui::TextDisabled("(비어 있음)");
+		}
+		ImGui::EndGroup();
+
+		ImGui::PopID();
+	}
+
 	FString GetAssetDisplayName(const FString& Path)
 	{
 		fs::path AssetPath(Path);
@@ -882,6 +927,10 @@ namespace
 			if (Property.Class == UMaterial::StaticClass())
 			{
 				DrawTextureSlot(reinterpret_cast<UMaterial**>(ObjPtr), 0);
+			}
+			else if (Property.Class == UTexture2D::StaticClass())
+			{
+				DrawTextureProperty(reinterpret_cast<UTexture2D**>(ObjPtr));
 			}
 			else if (Property.Class == UFont::StaticClass())
 			{

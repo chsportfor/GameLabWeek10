@@ -148,6 +148,52 @@ void FScene::RemoveAllLights()
 	SkyLights.Reset();
 }
 
+void FScene::AddDecal(UDecalComponent* Component)
+{
+	if (!Component || Component->SceneProxy) return;
+
+	FDecalSceneProxy* Proxy = Component->CreateSceneProxy();
+	if (!Proxy)
+	{
+		return;
+	}
+
+	Component->SceneProxy = Proxy;
+	Proxy->PackedIndex = DecalSceneProxies.Num();
+
+	DecalSceneProxies.Add(Proxy);
+}
+
+void FScene::RemoveDecal(UDecalComponent* Component)
+{
+	if (!Component) return;
+
+	FDecalSceneProxy* Proxy = Component->SceneProxy;
+	if (!Proxy)
+	{
+		return;
+	}
+
+	const int32 Index = Proxy->PackedIndex;
+
+	DecalSceneProxies.RemoveAtSwap(Index);
+	if (Index < DecalSceneProxies.Num())
+		DecalSceneProxies[Index]->PackedIndex = Index;
+
+	Component->SceneProxy = nullptr;
+	delete Proxy;
+}
+
+void FScene::RemoveAllDecals()
+{
+	for (FDecalSceneProxy* Proxy : DecalSceneProxies)
+	{
+		delete Proxy;
+	}
+	
+	DecalSceneProxies.Reset();
+}
+
 // 등록된 라이트를 셰이더용 상수로 모아 Renderer에 올린다. 컴포넌트 값을 매 프레임 직접 읽으므로 별도 갱신 경로가 필요 없다.
 void FScene::UpdateLights(FRenderer* Renderer)
 {

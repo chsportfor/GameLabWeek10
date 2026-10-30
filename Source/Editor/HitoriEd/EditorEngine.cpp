@@ -23,6 +23,7 @@
 #include "Collision/HitResult.h"
 #include "Components/BillboardComponent.h"
 #include "GameFramework/Actor/LightActorBase.h"
+#include "GameFramework/Actor/DecalActor.h"
 
 #include "Asset/AssetManager.h"
 #include "Render/RenderResourceManager.h"
@@ -1051,6 +1052,10 @@ void UEditorEngine::RenderOverlayPass(const int32 ViewIndex, UWorld& ViewWorld, 
 			if (ALightActorBase* LightActor = Cast<ALightActorBase>(Gizmo->GetTarget()->GetOwner()))
 			{
 				LightActor->GetLightComponent()->DrawDebug(LineBatcher.get());
+			}
+			else if (ADecalActor* DecalActor = Cast<ADecalActor>(Gizmo->GetTarget()->GetOwner()))
+			{
+				DecalActor->GetDecalComponent()->DrawDebug(LineBatcher.get());
 			}
 		}
 

@@ -3,6 +3,7 @@
 #include "PrimitiveSceneProxy.h"
 #include "LightSceneProxy.h"
 #include "LocalLightSceneProxy.h"
+#include "DecalSceneProxy.h"
 #include "DirectionalLightSceneProxy.h"
 #include "Components/BillboardComponent.h"
 #include "Components/PrimitiveComponent.h"
@@ -42,6 +43,10 @@ public:
 	bool HasFogOverride() const;
 	const FFogInfo* GetFogInfo() const;
 
+	void AddDecal(UDecalComponent* Component);
+	void RemoveDecal(UDecalComponent* Component);
+	void RemoveAllDecals();
+
 	void UpdateAllTransforms();
 
 	void BuildBVH();
@@ -69,6 +74,7 @@ public:
 
 	TArray<FLocalLightSceneProxy*>        LocalLightProxies;      // ↔ PackedIndex ↔
 	TArray<FLightRenderParameters>        LocalLightParameters;   // GPU 업로드용, 같은 순서
+	TArray<FDecalSceneProxy*>			  DecalSceneProxies;
 	TArray<FDirectionalLightSceneProxy*>  DirectionalLightProxies;
 	TArray<USkyLightComponent*>           SkyLights;               // 프록시 없음
 
