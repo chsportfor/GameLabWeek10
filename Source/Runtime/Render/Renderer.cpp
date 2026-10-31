@@ -400,6 +400,41 @@ void FRenderer::UpdateShadowStats()
 	FStatRegistry::SetMemory(ShadowStats::STAT_AtlasReservedMemory, ReservedBytes);
 }
 
+
+bool FRenderer::EnsureDBuffer(uint32 InDBufferWidth, uint32 InDBufferHeight)
+{
+	if (InDBufferWidth == 0 || InDBufferHeight == 0)
+	{
+		return (false);
+	}
+	if (!DBuffer || DBuffer->GetWidth() < InDBufferWidth || DBuffer->GetHeight() < InDBufferHeight)
+	{
+
+		D3D11_TEXTURE2D_DESC Desc{};
+		Desc.Width = DBuffer ? std::max(InDBufferWidth, DBuffer->GetWidth()) : InDBufferWidth;
+		Desc.Height = DBuffer ? std::max(InDBufferHeight, DBuffer->GetHeight()) : InDBufferHeight;
+		Desc.MipLevels = 1;
+		Desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+		Desc.SampleDesc.Count = 1;
+		Desc.Usage = D3D11_USAGE_DEFAULT;
+		Desc.ArraySize = 1;
+		Desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+		DBuffer = RenderCommand::CreateTexture2D(Desc);
+
+		return (DBuffer && DBuffer->GetRTV() != nullptr);
+	}
+	else
+	{
+		return (true);
+	}
+}
+
+FTexture2D* FRenderer::GetDBuffer() const
+{
+	return (DBuffer.get());
+}
+
 // 카메라의 ViewProjection을 공통 렌더 경로로 전달한다.
 void FRenderer::RenderAll(FRenderQueue& InQueue, UCameraComponent* CameraComponent)
 {
@@ -422,8 +457,12 @@ void FRenderer::RenderOpaque(const FMatrix& ViewProjection)
 	RenderCommand::BindConstantBuffer(5, GridLightingCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 	RenderCommand::BindSamplerState(1, ESamplerState::ShadowPCF,EShaderBindFlagBits::Pixel);
 	BindShadowResources();
+
+	if (DBuffer)
+		RenderCommand::BindShaderResource(8, DBuffer.get(), EShaderBindFlagBits::Pixel);
 	DrawStaticGroups();
 	DrawPackets(0, FirstTranslucentIndex, ViewProjection);
+	RenderCommand::UnbindShaderResource(8, EShaderBindFlagBits::Pixel);
 }
 
 // RenderOpaque가 남긴 반투명 패킷을 먼 것부터 그린다.

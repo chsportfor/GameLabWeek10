@@ -144,6 +144,9 @@ bool UEditorEngine::Init()
 	FogRenderer = MakeUnique<FFogRenderer>();
 	FogRenderer->Init(Renderer);
 
+	DecalRenderer = MakeUnique<FDecalRenderer>();
+	DecalRenderer->Init(Renderer);
+
 	FXAARenderer = MakeUnique<FFXAARenderer>();
 	FXAARenderer->Init();
 
@@ -916,7 +919,8 @@ FWorldContext* UEditorEngine::GetPIEWorldContext(int32 WorldPIEInstance)
 }
 
 // 입력 View의 Ray와 피킹으로 Gizmo·공유 선택을 갱신한다.
-void UEditorEngine::RenderOpaquePass(int32 ViewIndex, const FRenderingInfo& ViewRenderingInfo, const FViewConstants& ViewConstants, FRenderQueue& RenderQueue)
+void UEditorEngine::RenderOpaquePass(int32 ViewIndex, const FRenderingInfo& ViewRenderingInfo, const FViewConstants& ViewConstants, 
+	FRenderQueue& RenderQueue, UWorld& ViewWorld)
 {
 	const FMatrix& ViewProjection = ViewConstants.ViewProjection;
 	const FVector& ViewCameraLocation = ViewConstants.CameraWorldPos;
@@ -946,8 +950,9 @@ void UEditorEngine::RenderOpaquePass(int32 ViewIndex, const FRenderingInfo& View
 		Renderer->RenderQueueSorting(RenderQueue, ViewConstants);
 
 		// 2.5D는 타일의 실제 깊이가 필요하므로 불투명 깊이를 먼저 채운 뒤 컬링한다.
+		// 데칼도 PreDepth를 사용한다
 		FTexture2D* DepthTexture = ViewRenderingInfo.DepthStencil.Texture;
-		const bool bDepthPrepass = Renderer->GetLightCullingMode() == ELightCullingMode::Tiled25D && DepthTexture;
+		const bool bDepthPrepass = DepthTexture;
 		if (bDepthPrepass)
 		{
 			Renderer->RenderDepth(ViewProjection);
@@ -961,9 +966,18 @@ void UEditorEngine::RenderOpaquePass(int32 ViewIndex, const FRenderingInfo& View
 			ViewRenderingInfo.ViewportSetting.Width,
 			ViewRenderingInfo.ViewportSetting.Height,
 			bDepthPrepass ? DepthTexture : nullptr);
-
+		
 		if (bDepthPrepass)
 		{
+			DecalRenderer->OnRender(
+				Renderer,
+				ViewWorld.GetScene().DecalSceneProxies,
+				DepthTexture,
+				ViewProjection,
+				ViewRenderingInfo.ViewportSetting);
+
+			RenderCommand::SetRasterizerState(SceneRasterizerState);
+
 			// 스카이박스와 Prepass 깊이를 지우지 않도록 Load로 다시 묶는다
 			FRenderingInfo ResumeInfo = HDRInfo;
 			for (FRenderingDesc& Color : ResumeInfo.ColorRenderTargets)
@@ -1444,7 +1458,7 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 	}
 
 	// 준비한 View 상수를 장면 패스에 전달한다.
-	RenderOpaquePass(ViewIndex, ViewRenderingInfo, ViewConstants, RenderQueue);
+	RenderOpaquePass(ViewIndex, ViewRenderingInfo, ViewConstants, RenderQueue, ViewWorld);
 
 	if (ShowFlags.IsEnabled(EEngineShowFlag::DepthView))
 	{

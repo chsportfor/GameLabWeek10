@@ -28,6 +28,21 @@ void UDecalComponent::SetSortOrder(int32 InSortOrder)
 	SortOrder = InSortOrder;
 }
 
+const FLinearColor& UDecalComponent::GetDecalColor() const
+{
+	return (DecalColor);
+}
+
+int32 UDecalComponent::GetSortOrder() const
+{
+	return (SortOrder);
+}
+
+bool UDecalComponent::IsAdditive() const
+{
+	return (bAdditive);
+}
+
 FMatrix UDecalComponent::GetTransformIncludingDecalSize() const   // 프록시와 셰이더에서 사용
 {
 	FTransform SizeTransform;

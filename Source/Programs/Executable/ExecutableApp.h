@@ -4,6 +4,7 @@
 
 #include "Engine/GameEngine.h"
 #include "Render/FogRenderer.h"
+#include "Render/DecalRenderer.h"
 #include "Render/FShadowViewRenderer.h"
 #include "Render/FXAARenderer.h"
 #include "Render/SkyboxRenderer.h"
@@ -13,7 +14,7 @@
 
 struct FLODViewContext;
 struct FMinimalViewInfo;
-
+s
 class UExecutableEngine : public UGameEngine {
 	DECLARE_CLASS(UExecutableEngine, UGameEngine)
 
@@ -37,6 +38,7 @@ private:
 private:
 	UWorld* mWorld{};
 	FSkyboxRenderer mSkyboxRenderer{};
+	FDecalRenderer mDecalRenderer;
 	FFogRenderer mFogRenderer{};
 	FShadowViewRenderer mShadowViewRenderer{};
 	FToneMapRenderer mToneMapRenderer{};

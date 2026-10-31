@@ -140,6 +140,9 @@ StructuredBuffer<uint> CellLightIndices : register(t12);
 
 Texture2D DiffuseTexture : register(t0);
 Texture2D NormalTexture : register(t1);
+#if !defined(EDITOR_ARROW_SHADER)
+Texture2D DBuffer : register(t8);
+#endif
 SamplerState MaterialSampler : register(s0);
 SamplerComparisonState PCFSampler : register(s1);
 
@@ -872,9 +875,17 @@ float4 mainPS(VS_OUTPUT Input) : SV_TARGET
     const float4 TexColor = DiffuseTexture.Sample(MaterialSampler, UV);
     float4 Albedo = TexColor * BaseColor;
 #if !defined(EDITOR_ARROW_SHADER)
+    
     // 씬은 HDR 타깃에 선형으로 쌓이므로 sRGB로 인코딩된 디퓨즈 텍스처와 BaseColor를 각각 선형으로 바꾼다.
     // 에디터 화살표는 톤 매핑 이후 LDR 타깃에 그려지므로 sRGB 그대로 둔다.
     Albedo.rgb = SRGBToLinear(TexColor.rgb) * SRGBToLinear(BaseColor.rgb);
+    
+    if (bOpaque > 0.5f)
+    {
+        const float4 Decal = DBuffer.Load(int3(Input.SvPosition.xy, 0));
+        Albedo.rgb = Albedo.rgb * (1.0f - Decal.a) + Decal.rgb;
+    }
+    
 
     if (LightDebugMode == LIGHT_DEBUG_MODE_CELL_HEATMAP && NumTilesX > 0)
     {

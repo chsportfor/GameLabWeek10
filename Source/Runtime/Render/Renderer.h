@@ -287,6 +287,13 @@ public:
 	FOcclusionMeasureResult MeasureOpaqueOcclusion(const FMatrix& ViewProjection);
 
 	void GetShadowViewIds(const FLightSceneProxy& LightProxy, TArray<uint32>& OutViewIds) const;
+	
+	
+
+	// DBuffer가 요청 크기를 담을 수 있게 보장한다.
+	bool EnsureDBuffer(uint32 InDBufferWidth, uint32 InDBufferHeight);
+	FTexture2D* GetDBuffer() const;
+	
 
 	// Details Preview에서 선택한 투영의 이번 프레임 캐시 상태를 확인한다.
 	struct FShadowCacheDebugInfo
@@ -363,6 +370,9 @@ private:
 	// 타깃 교체 전에 초기화한다.
 	TArray<FTexture2D*> ShadowDepthBindings;
 
+	// 데칼용 버퍼
+	TUniquePtr<FTexture2D> DBuffer;
+
 	// 필요한 항목 수가 기존 용량을 초과했을 때 GPU 버퍼를 교체한다.
 	bool EnsureShadowParameterCapacity(uint32 RequiredCount);
 
@@ -373,6 +383,10 @@ private:
 	void BindShadowResources();
 	// 그림자 작업 및 자원에 대해 통계를 갱신한다.
 	void UpdateShadowStats();
+
+
+	
+	
 
 	// FIFO 소비용 배열의 용량만 재사용하며 매 View의 패킷 값은 새로 채운다.
 	FRenderQueue RenderPackets;

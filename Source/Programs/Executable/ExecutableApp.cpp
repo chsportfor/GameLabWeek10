@@ -4,6 +4,7 @@
 #ifdef EXECUTABLE
 
 #include "Asset/LOD/StaticMeshLODSelector.h"
+#include "Render/DecalRenderer.h"
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Sequence/SequenceActor.h"
@@ -43,7 +44,7 @@ bool UExecutableEngine::Init() {
 	}
 
 	FRenderer* Renderer{ GetEngineLoop().GetRenderer() };
-	if (!mSkyboxRenderer.Init(ResourcePaths::DefaultSkyPanorama) || !mFogRenderer.Init(Renderer) || !mShadowViewRenderer.Init() || !mToneMapRenderer.Init() || !mFXAARenderer.Init()) {
+	if (!mSkyboxRenderer.Init(ResourcePaths::DefaultSkyPanorama) || !mFogRenderer.Init(Renderer) || !mShadowViewRenderer.Init() || !mToneMapRenderer.Init() || !mFXAARenderer.Init() || !mDecalRenderer.Init(Renderer)) {
 		HTR_LOG(Error, "[Executable] Failed to initialize rendering");
 		return false;
 	}
@@ -227,11 +228,30 @@ void UExecutableEngine::RenderScene(const FMinimalViewInfo& Camera, const FViewC
 	RenderCommand::SetBlendState(EBlendState::Opaque);
 	RenderCommand::SetDepthStencilState(EDepthStencilState::Default);
 	RenderCommand::SetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
 	Renderer->RenderQueueSorting(mRenderQueue, ViewConstants);
+	Renderer->RenderDepth(ViewConstants.ViewProjection);
+	RenderCommand::EndRenderPass(mRenderingInfo);
 	Renderer->CullLights(Camera.GetViewMatrix(), Camera.GetProjectionMatrix(), mRenderingInfo.ViewportSetting.Width, mRenderingInfo.ViewportSetting.Height);
+
+	mDecalRenderer.OnRender(
+		Renderer,
+		mWorld->GetScene().DecalSceneProxies,
+		mDepthTarget.get(),
+		ViewConstants.ViewProjection,
+		mRenderingInfo.ViewportSetting);
+	RenderCommand::SetRasterizerState(ERasterizerState::SolidBack);
+
+	FRenderingInfo ResumeInfo{ mRenderingInfo };
+	for (FRenderingDesc& Color : ResumeInfo.ColorRenderTargets)
+		Color.LoadOp = ERenderTargetLoadOp::Load;
+	ResumeInfo.DepthStencil.LoadOp = ERenderTargetLoadOp::Load;
+	RenderCommand::BeginRenderPass(ResumeInfo);
+
 	Renderer->RenderOpaque(ViewConstants.ViewProjection);
 	Renderer->RenderTranslucent(ViewConstants.ViewProjection);
 	RenderCommand::EndRenderPass(mRenderingInfo);
+	
 }
 
 void UExecutableEngine::RenderPostProcess(const FMinimalViewInfo& Camera) {

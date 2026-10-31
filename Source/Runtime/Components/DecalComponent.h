@@ -31,6 +31,10 @@ public:
     void SetDecalColor(const FLinearColor& InDecalColor);
     void SetSortOrder(int32 InSortOrder);
 
+    const FLinearColor& GetDecalColor() const;
+    int32 GetSortOrder() const;
+    bool IsAdditive() const;
+    
     FMatrix GetTransformIncludingDecalSize() const;   // 프록시와 셰이더에서 사용
     void DrawDebug(FLineBatcher* LineBatcher) const;
 
