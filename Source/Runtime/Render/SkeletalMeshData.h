@@ -7,8 +7,7 @@
 struct FSkeletalVertex
 {
 	FVertex Vertex;
-	// FSkeletalMeshData::Bones 배열의 인덱스. Control Point 번호와는 별개다.
-	uint32 BoneIndices[4] = {};
+	uint32 BoneIndices[4] = {};	// 해당 배열 내부의 Index는 FSkeletalMeshData의 Bones 배열의 Index
 	float BoneWeights[4] = {};
 };
 
@@ -17,7 +16,6 @@ struct FSkeletalBone
 	FString Name;
 	int32 ParentIndex = -1;
 	FTransform RefPoseTransform;
-	FMatrix InverseBindPose;
 };
 
 // 메시 하나의 정점과 삼각형 연결 정보.
@@ -32,4 +30,5 @@ struct FSkeletalMeshData
 {
 	TArray<FSkeletalMesh> Meshes;
 	TArray<FSkeletalBone> Bones;
+	TArray<FMatrix> InverseBindPoseMat;
 };

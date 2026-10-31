@@ -39,7 +39,7 @@ struct FFbxImportResult	// Fbx의 Import 결과로 나오는 값 구조체
 {
 	bool bSuccess = false;
 
-	// ProcessNode가 순회하면서 수집한 결과. Cook에서 최종 데이터로 묶는다.
+	// 본 순회와 메시 순회에서 수집한 결과. Cook에서 최종 데이터로 묶는다.
 	TArray<FSkeletalMesh> Meshes;
 	TArray<FSkeletalBone> Bones;
 };
@@ -51,7 +51,8 @@ public:
 	FFbxImporter();
 	~FFbxImporter();
 	FFbxImportResult ImportFBX(const FString& Path, const FString& SceneName);
-	void ProcessNode(FbxNode* Node, TMap<FbxNode*, int32>& BoneIndexByNode, FFbxImportResult& OutResult);
+	void ProcessSkeletonNode(FbxNode* Node, TMap<FbxNode*, int32>& BoneIndexByNode, FFbxImportResult& OutResult);
+	void ProcessMeshNode(FbxNode* Node, const TMap<FbxNode*, int32>& BoneIndexByNode, FFbxImportResult& OutResult);
 	FSkeletalMesh ProcessMesh(FbxMesh* Mesh, const TMap<FbxNode*, int32>& BoneIndexByNode);
 	FSkeletalBone ProcessSkeleton(FbxNode* Node, const TMap<FbxNode*, int32>& BoneIndexByNode);
 	void BuildMeshVerticesAndIndices(FbxMesh* Mesh, const TMap<int32, FBoneInfluence>& InfluenceByControlPoint, FSkeletalMesh& SkeletalMesh);

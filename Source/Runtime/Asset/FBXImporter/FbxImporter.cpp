@@ -1,5 +1,7 @@
 #include "EnginePCH.h"
 #include "FbxImporter.h"
+#include <cmath>
+#include <stdexcept>
 
 struct FBoneInfluence
 {
@@ -97,34 +99,45 @@ FFbxImportResult FFbxImporter::ImportFBX(const FString& Path, const FString& Sce
 
 	pFbxImporter->Destroy();	// 다 채웠으므로 Importer는 Destroy
 
-	// TODO: 스킨 연결을 추가할 때는 메시 처리 전에 본 수집을 완료하는 순서로 분리한다.
 	TMap<FbxNode*, int32> BoneIndexByNode;
 	FbxNode* pFbxRootNode = pFbxScene->GetRootNode();
 
-	if (pFbxRootNode)
+	try
 	{
-		for (int i = 0; i < pFbxRootNode->GetChildCount(); i++)	// RootNode 내려가면서 정보 읽어서 Import
+		if (pFbxRootNode)
 		{
-			ProcessNode(pFbxRootNode->GetChild(i), BoneIndexByNode, FbxResult);
+			// 전체 Tree에 대해 SkeletonNode부터 전체 순회하여 BoneIndexByNode를 완성
+			for (int i = 0; i < pFbxRootNode->GetChildCount(); i++)
+			{
+				ProcessSkeletonNode(pFbxRootNode->GetChild(i), BoneIndexByNode, FbxResult);
+			}
+
+			// 모든 본의 번호가 준비된 후 MeshNode 순회 진행
+			for (int i = 0; i < pFbxRootNode->GetChildCount(); i++)
+			{
+				ProcessMeshNode(pFbxRootNode->GetChild(i), BoneIndexByNode, FbxResult);
+			}
 		}
+	}
+	catch (const std::runtime_error& Exception)
+	{
+		HTR_LOG(Error, "[FBX] Reference pose import failed: {}", Exception.what());
+		pFbxScene->Destroy();
+		return FFbxImportResult{};
 	}
 	pFbxScene->Destroy();
 	FbxResult.bSuccess = true;
 	return FbxResult;
 }
 
-void FFbxImporter::ProcessNode(FbxNode* Node, TMap<FbxNode*, int32>& BoneIndexByNode, FFbxImportResult& OutResult)
+void FFbxImporter::ProcessSkeletonNode(FbxNode* Node, TMap<FbxNode*, int32>& BoneIndexByNode, FFbxImportResult& OutResult)
 {
+	if (!Node) return;
+
 	for (int i = 0; i < Node->GetNodeAttributeCount(); i++) // 한 Node에 여러 Attribute가 있을 수 있으므로 전체를 순회
 	{
 		FbxNodeAttribute* NodeAttri = Node->GetNodeAttributeByIndex(i);
-		if (NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eMesh) // Mesh 일경우 FbxMesh로 Cast 후 ProcessMesh
-		{
-			FbxMesh* Mesh = static_cast<FbxMesh*>(NodeAttri);
-			FSkeletalMesh SkeletalMesh = ProcessMesh(Mesh, BoneIndexByNode);
-			OutResult.Meshes.Add(SkeletalMesh);
-		}
-		else if (NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eSkeleton) // Skeleton 일경우 FbxSkeleton로 Cast 후 ProcessSkeleton
+		if (NodeAttri && NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eSkeleton)
 		{
 			FSkeletalBone Bone = ProcessSkeleton(Node, BoneIndexByNode);
 			BoneIndexByNode.Add(Node, OutResult.Bones.Num());
@@ -133,7 +146,27 @@ void FFbxImporter::ProcessNode(FbxNode* Node, TMap<FbxNode*, int32>& BoneIndexBy
 	}
 	for (int i = 0; i < Node->GetChildCount(); ++i) // 연결된 자식에 대해서 재귀적으로 순회
 	{
-		ProcessNode(Node->GetChild(i), BoneIndexByNode, OutResult);
+		ProcessSkeletonNode(Node->GetChild(i), BoneIndexByNode, OutResult);
+	}
+}
+
+void FFbxImporter::ProcessMeshNode(FbxNode* Node, const TMap<FbxNode*, int32>& BoneIndexByNode, FFbxImportResult& OutResult)
+{
+	if (!Node) return;
+
+	for (int i = 0; i < Node->GetNodeAttributeCount(); i++)	// 한 Node에 여러 Attribute가 있을 수 있으므로 전체를 순회
+	{
+		FbxNodeAttribute* NodeAttri = Node->GetNodeAttributeByIndex(i);
+		if (NodeAttri && NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eMesh)
+		{
+			FbxMesh* Mesh = static_cast<FbxMesh*>(NodeAttri);
+			FSkeletalMesh SkeletalMesh = ProcessMesh(Mesh, BoneIndexByNode);
+			OutResult.Meshes.Add(SkeletalMesh);
+		}
+	}
+	for (int i = 0; i < Node->GetChildCount(); ++i) // 연결된 자식에 대해서 재귀적으로 순회
+	{
+		ProcessMeshNode(Node->GetChild(i), BoneIndexByNode, OutResult);
 	}
 }
 
@@ -153,9 +186,9 @@ void FFbxImporter::BuildInfluenceMap(FbxMesh* Mesh, const TMap<FbxNode*, int32>&
 			FbxCluster* Cluster = Skin->GetCluster(ClusterIndex);
 			if (!Cluster) continue;
 
-			FbxNode* BoneNode = Cluster->GetLink();
+			FbxNode* BoneNode = Cluster->GetLink();	// Cluster와 연결된 BoneNode 찾기
 			if (!BoneNode) continue;
-			const int32* BoneIndex = BoneIndexByNode.Find(BoneNode);
+			const int32* BoneIndex = BoneIndexByNode.Find(BoneNode);	// 해당 Node의 BoneIndex 찾기
 			if (!BoneIndex)
 			{
 				HTR_LOG(Warning, "[FBX] Bone is not registered: {}", BoneNode->GetName());
@@ -167,15 +200,15 @@ void FFbxImporter::BuildInfluenceMap(FbxMesh* Mesh, const TMap<FbxNode*, int32>&
 			const double* Weights = Cluster->GetControlPointWeights();
 			if (!ControlPointIndices || !Weights) continue;
 
-			for (int InfluenceIndex = 0; InfluenceIndex < Count; ++InfluenceIndex)
+			for (int EntryIndex = 0; EntryIndex < Count; ++EntryIndex)	// Cluster 내부의 한 Bone이 영향을 주는 정점 배열, Weight 배열 순회
 			{
-				const int ControlPointIndex = ControlPointIndices[InfluenceIndex];
-				const float Weight = static_cast<float>(Weights[InfluenceIndex]);
+				const int ControlPointIndex = ControlPointIndices[EntryIndex];	// Cluster의 전체 CPIndices를 순회
+				const float Weight = static_cast<float>(Weights[EntryIndex]);	// Cluster의 전체 Weight를 순회
 
 				if (ControlPointIndex < 0 || ControlPointIndex >= Mesh->GetControlPointsCount()) continue;
 				if (Weight <= 0.0f) continue;
 
-				FBoneInfluence& Influence = InfluenceByControlPoint[ControlPointIndex];
+				FBoneInfluence& Influence = InfluenceByControlPoint[ControlPointIndex];	// Cluster 내부의 CPIndex를 바탕으로 Influence 정보를 추가
 				Influence.BoneIndices.Add(*BoneIndex);
 				Influence.BoneWeights.Add(Weight);
 			}
@@ -188,19 +221,87 @@ FSkeletalMesh FFbxImporter::ProcessMesh(FbxMesh* Mesh, const TMap<FbxNode*, int3
 {
 	FSkeletalMesh SkeletalMesh;
 	TMap<int32, FBoneInfluence> InfluenceByControlPoint;
-	BuildInfluenceMap(Mesh, BoneIndexByNode, InfluenceByControlPoint);
-	BuildMeshVerticesAndIndices(Mesh, InfluenceByControlPoint, SkeletalMesh);
+	BuildInfluenceMap(Mesh, BoneIndexByNode, InfluenceByControlPoint);	// Control Point - Influence간 연결 Map을 완성
+	BuildMeshVerticesAndIndices(Mesh, InfluenceByControlPoint, SkeletalMesh);	// 이후 정점 추가 과정에서 ControlPoint에 맞춰 Vertex 정보 추가하면서 같이 추가
 	return SkeletalMesh;
 }
 
 FSkeletalBone FFbxImporter::ProcessSkeleton(FbxNode* Node, const TMap<FbxNode*, int32>& BoneIndexByNode)
 {
+	if (!Node || !Node->GetScene())
+	{
+		throw std::runtime_error("Bone node or scene is missing");
+	}
 
+	FSkeletalBone SkeletalBone;
+	SkeletalBone.Name = Node->GetName();
+	// 중간의 일반 노드를 건너뛰어 실제 본 계층의 부모를 찾는다.
+	FbxNode* ParentBoneNode = Node->GetParent();
+	while (ParentBoneNode && !BoneIndexByNode.Find(ParentBoneNode))
+	{
+		ParentBoneNode = ParentBoneNode->GetParent();
+	}
+	const int32* ParentIndex = ParentBoneNode ? BoneIndexByNode.Find(ParentBoneNode) : nullptr;
+	SkeletalBone.ParentIndex = ParentIndex ? *ParentIndex : -1;
+
+	int ScenePoseCount = Node->GetScene()->GetPoseCount();
+	for (int i = 0; i < ScenePoseCount; i++)	// Scene 내부의 전체 Pose에 대해서 순회
+	{
+		FbxPose* CurrentPose = Node->GetScene()->GetPose(i);
+		if (CurrentPose && CurrentPose->IsBindPose())
+		{
+			int NodePoseIndex = CurrentPose->Find(Node);
+			if (NodePoseIndex < 0) continue;
+			FbxMatrix RefTransform = CurrentPose->GetMatrix(NodePoseIndex);	// CurrentPose에서 Node를 찾았을때만 Matrix 호출
+			if (ParentBoneNode)
+			{
+				int ParentPoseIndex = CurrentPose->Find(ParentBoneNode);	
+				if (ParentPoseIndex < 0) continue;
+				FbxMatrix RefParentTransform = CurrentPose->GetMatrix(ParentPoseIndex);	// CurrentPose에서 부모 Node를 찾았을때만 Matrix 호출 
+				FbxMatrix ParentInverse = RefParentTransform.Inverse();
+				FbxMatrix Identity;
+				Identity.SetIdentity();
+				if (RefParentTransform * ParentInverse != Identity) continue;
+				RefTransform = ParentInverse * RefTransform; // 전역 행렬에서 부모 변환을 제거해 로컬 변환 계산
+			}
+			else
+			{
+				// 루트 본은 부모 역행렬을 적용하지 않고 전역 Bind Pose 유지
+			}
+
+			FbxVector4 T, S, Shear;
+			FbxQuaternion Q;
+			double Sign;
+			RefTransform.GetElements(T, Q, Shear, S, Sign);
+			SkeletalBone.RefPoseTransform = FTransform(FVector(float(T[0]), float(T[1]), float(T[2])),
+				FVector(float(S[0]), float(S[1]), float(S[2])), 
+				FQuat(float(Q[0]), float(Q[1]), float(Q[2]), float(Q[3])).Normalized().ToFRotator());
+			return SkeletalBone;
+		}
+	}
 }
 
 void FFbxImporter::Cook(const FFbxImportResult& ImportResult, FSkeletalMeshData& OutData)
 {
+	OutData.Meshes = ImportResult.Meshes;	// Import 결과 Meshes 채움
+	OutData.Bones = ImportResult.Bones;		// Import 결과 Bones 채움
 
+	TArray<FMatrix> GlobalRefMatrix; // 부모 기준 Transform 저장하기 위한 임시배열
+	GlobalRefMatrix.Reserve(ImportResult.Bones.Num());
+	OutData.InverseBindPoseMat.Reset();
+	OutData.InverseBindPoseMat.Reserve(ImportResult.Bones.Num());
+
+	for (int i = 0; i < OutData.Bones.Num(); i++)
+	{
+		FTransform RefTransform = ImportResult.Bones[i].RefPoseTransform;
+		FMatrix RefMatrix = OutData.Bones[i].RefPoseTransform.GetLocalMatrix();
+		if (OutData.Bones[i].ParentIndex != -1)
+		{
+			RefMatrix = RefMatrix * GlobalRefMatrix[OutData.Bones[i].ParentIndex]; // 부모 기준 Bone Transform을 전역 기준 BindPose Transform으로 이동, 부모기준 Transform을 곱함
+		}
+		GlobalRefMatrix.Add(RefMatrix);	// 다음 계산시 부모 Transform으로 활용하기 위해 저장
+		OutData.InverseBindPoseMat.Add(RefMatrix.Inverse());	// Inverse한 행렬을 더해 InverBindPose를 채움, Bones[i]로 뽑았으므로 Bones 배열에 대응되는 순서로 저장
+	}
 }
 
 void FFbxImporter::BuildMeshVerticesAndIndices(FbxMesh* Mesh,const TMap<int32, FBoneInfluence>& InfluenceByControlPoint,FSkeletalMesh& SkeletalMesh)
