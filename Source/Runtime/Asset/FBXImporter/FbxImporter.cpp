@@ -1,6 +1,13 @@
 #include "EnginePCH.h"
 #include "FbxImporter.h"
 
+struct FBoneInfluence
+{
+	TArray<int32> BoneIndices;
+	TArray<float> BoneWeights;
+};
+
+
 FFbxImporter::FFbxImporter()
 {
 	pFbxManager = FbxManager::Create();	// FbxManager 생성
@@ -33,13 +40,13 @@ FFbxImporter::~FFbxImporter()
 FFbxImportResult FFbxImporter::ImportFBX(const FString& Path, const FString& SceneName)
 {
 	FFbxImportResult FbxResult;
-	if (!pFbxManager)
+	if (!pFbxManager)	// Manager가 초기에 제대로 생성되었는지 여부 체크
 	{
 		HTR_LOG(Error, "[FBX] Manager Is Not Ready: {}", Path);
 		return FbxResult;
 	}
 
-	FbxIOSettings* pFbxIOSetting = pFbxManager->GetIOSettings();
+	FbxIOSettings* pFbxIOSetting = pFbxManager->GetIOSettings();	// FbxManager의 IO Setting 객체 생성
 	if (!pFbxIOSetting)
 	{
 		HTR_LOG(Error, "[FBX] IOSettings Is Not Ready: {}", Path);
@@ -61,7 +68,7 @@ FFbxImportResult FFbxImporter::ImportFBX(const FString& Path, const FString& Sce
 		return FbxResult;
 	}                          
 
-	FbxGeometryConverter Converter(pFbxManager);	// Polygon 삼각형화 하기 위한 Geometry Converter
+	FbxGeometryConverter Converter(pFbxManager);	// Polygon 삼각형화 하기 위한 Geometry Converter 생성
 	FbxScene* pFbxScene = FbxScene::Create(pFbxManager, SceneName.c_str()); // FbxScene 객체 생성
 	if (!pFbxScene)
 	{
@@ -90,14 +97,15 @@ FFbxImportResult FFbxImporter::ImportFBX(const FString& Path, const FString& Sce
 
 	pFbxImporter->Destroy();	// 다 채웠으므로 Importer는 Destroy
 
-	TMap<FbxNode*, int32> ParentMap;
+	// TODO: 스킨 연결을 추가할 때는 메시 처리 전에 본 수집을 완료하는 순서로 분리한다.
+	TMap<FbxNode*, int32> BoneIndexByNode;
 	FbxNode* pFbxRootNode = pFbxScene->GetRootNode();
 
 	if (pFbxRootNode)
 	{
 		for (int i = 0; i < pFbxRootNode->GetChildCount(); i++)	// RootNode 내려가면서 정보 읽어서 Import
 		{
-			ProcessNode(pFbxRootNode->GetChild(i), ParentMap, FbxResult);
+			ProcessNode(pFbxRootNode->GetChild(i), BoneIndexByNode, FbxResult);
 		}
 	}
 	pFbxScene->Destroy();
@@ -105,106 +113,174 @@ FFbxImportResult FFbxImporter::ImportFBX(const FString& Path, const FString& Sce
 	return FbxResult;
 }
 
-void FFbxImporter::ProcessNode(FbxNode* Node, TMap<FbxNode*, int32>& ParentMap, FFbxImportResult& OutResult)
+void FFbxImporter::ProcessNode(FbxNode* Node, TMap<FbxNode*, int32>& BoneIndexByNode, FFbxImportResult& OutResult)
 {
-	const char* pNodeName = Node->GetName();                // Node 이름 저장
 	for (int i = 0; i < Node->GetNodeAttributeCount(); i++) // 한 Node에 여러 Attribute가 있을 수 있으므로 전체를 순회
 	{
 		FbxNodeAttribute* NodeAttri = Node->GetNodeAttributeByIndex(i);
 		if (NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eMesh) // Mesh 일경우 FbxMesh로 Cast 후 ProcessMesh
 		{
 			FbxMesh* Mesh = static_cast<FbxMesh*>(NodeAttri);
-			FFbxMeshInfo FbxMeshInfo = ProcessMesh(Node, Mesh);
-			OutResult.Meshes.Add(FbxMeshInfo);
+			FSkeletalMesh SkeletalMesh = ProcessMesh(Mesh, BoneIndexByNode);
+			OutResult.Meshes.Add(SkeletalMesh);
 		}
 		else if (NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eSkeleton) // Skeleton 일경우 FbxSkeleton로 Cast 후 ProcessSkeleton
 		{
-			FbxSkeleton* Skeleton = static_cast<FbxSkeleton*>(NodeAttri);
-			FFbxBoneInfo FbxSkeletalMeshInfo = ProcessSkeleton(Node, Skeleton, ParentMap);
-			ParentMap.Add(Node, OutResult.SkeletalMeshes.BoneInfoArray.Num());
-			OutResult.SkeletalMeshes.BoneInfoArray.Add(FbxSkeletalMeshInfo);
-		}
-		else
-		{
-			ProcessEtc(Node); // 그외의 경우 ProcessEtc
+			FSkeletalBone Bone = ProcessSkeleton(Node, BoneIndexByNode);
+			BoneIndexByNode.Add(Node, OutResult.Bones.Num());
+			OutResult.Bones.Add(Bone);
 		}
 	}
-
 	for (int i = 0; i < Node->GetChildCount(); ++i) // 연결된 자식에 대해서 재귀적으로 순회
 	{
-		ProcessNode(Node->GetChild(i), ParentMap, OutResult);
+		ProcessNode(Node->GetChild(i), BoneIndexByNode, OutResult);
 	}
 }
 
-FFbxMeshInfo FFbxImporter::ProcessMesh(FbxNode* Node, FbxMesh* Mesh)
+void FFbxImporter::BuildInfluenceMap(FbxMesh* Mesh, const TMap<FbxNode*, int32>& BoneIndexByNode, TMap<int32, FBoneInfluence>& InfluenceByControlPoint)
 {
-	FFbxMeshInfo MeshInfo;
-	FbxStringList UVSetNames;
-	Mesh->GetUVSetNames(UVSetNames);                  // UV 추출을 위한 UVSet 이름 넣어두기
-	TMap<FFbxIndex, int32, FFbxIndexHash> pFbxCache;  // 동일한 정점 체크를 위해서 사용할 Map 생성, 빠른 계산을 위해 Hash 사용
-	for (int i = 0; i < Mesh->GetPolygonCount(); i++)	// 전체 삼각형 개수에 대하여 순회, Import 과정에서 삼각형화 했으므로 전체 Polygon은 다 삼각형
+	if (!Mesh) return;
+
+	const int SkinCount = Mesh->GetDeformerCount(FbxDeformer::eSkin);
+	for (int SkinIndex = 0; SkinIndex < SkinCount; ++SkinIndex)	// FbxSkin만큼 순회
 	{
-		if (Mesh->GetPolygonSize(i) == 3)
+		FbxSkin* Skin = static_cast<FbxSkin*>(Mesh->GetDeformer(SkinIndex, FbxDeformer::eSkin));
+		if (!Skin) continue;
+
+		const int ClusterCount = Skin->GetClusterCount();
+		for (int ClusterIndex = 0; ClusterIndex < ClusterCount; ++ClusterIndex)	// 한 FbxSkin의 전체 Cluster만큼 순회
 		{
-			for (int j = 0; j < 3; j++)
+			FbxCluster* Cluster = Skin->GetCluster(ClusterIndex);
+			if (!Cluster) continue;
+
+			FbxNode* BoneNode = Cluster->GetLink();
+			if (!BoneNode) continue;
+			const int32* BoneIndex = BoneIndexByNode.Find(BoneNode);
+			if (!BoneIndex)
 			{
-				int VertexIndex = Mesh->GetPolygonVertex(i, j);
-				FbxVector4 FbxVertex = Mesh->GetControlPointAt(VertexIndex);	// i번째 Polygon의 j번째 점 Vertex 가져옴
-				FVertex Vertex;		
-				Vertex.Position = FVector(static_cast<float>(FbxVertex[0]), static_cast<float>(FbxVertex[1]), static_cast<float>(FbxVertex[2]));	// Vertex의 Position에 정점 좌표 대입
+				HTR_LOG(Warning, "[FBX] Bone is not registered: {}", BoneNode->GetName());
+				continue;
+			}
 
-				FbxVector4 Normal;	
-				bool bNormal = Mesh->GetPolygonVertexNormal(i, j, Normal); // i번째 Polygon의 j번째 점 Normal 가져옴
-				if(bNormal) Vertex.Normal = FVector(static_cast<float>(Normal[0]), static_cast<float>(Normal[1]), static_cast<float>(Normal[2]));	// Vertex의 Normal에 값 대입
+			const int Count = Cluster->GetControlPointIndicesCount();
+			const int* ControlPointIndices = Cluster->GetControlPointIndices();
+			const double* Weights = Cluster->GetControlPointWeights();
+			if (!ControlPointIndices || !Weights) continue;
 
-				if (UVSetNames.GetCount() > 0)	// UVSet이 존재할때 체크
-				{
-					FbxVector2 UV;
-					bool bUnmapped = false;
-					bool bSuccess = Mesh->GetPolygonVertexUV( i, j, UVSetNames.GetStringAt(0), UV, bUnmapped); // i번째 Polygon의 j번째 점 UV 가져옴
-					if (bSuccess && !bUnmapped)	// Mapping된 UV를 잘 가져왔을때만 UV 대입
-					{
-						Vertex.UV = FVector2(static_cast<float>(UV[0]), static_cast<float>(UV[1]));	
-					}
-				}
+			for (int InfluenceIndex = 0; InfluenceIndex < Count; ++InfluenceIndex)
+			{
+				const int ControlPointIndex = ControlPointIndices[InfluenceIndex];
+				const float Weight = static_cast<float>(Weights[InfluenceIndex]);
 
-				FFbxIndex Key{VertexIndex,Vertex.Normal.X,Vertex.Normal.Y,Vertex.Normal.Z,Vertex.UV.X,Vertex.UV.Y}; // 현재 코드에서 얻은 Control Point 번호, Vertex 정보를 바탕으로 키 생성
-				if (const int32* Found = pFbxCache.Find(Key))
-				{
-					MeshInfo.Indices.Add(static_cast<uint32>(*Found));	// Position, Normal, UV가 다 겹치는 경우에는 동일한 정점이므로 Indices에만 추가
-				} 
-				else   // 그렇지 않은 경우에는 다른 정점으로 처리, Cache에 추가
-				{
-					uint32 NewVertexIndex = static_cast<uint32>(MeshInfo.Vertices.Num());
-					MeshInfo.Vertices.Add(Vertex);
-					MeshInfo.Indices.Add(NewVertexIndex);
-					pFbxCache.Add(Key, static_cast<int32>(NewVertexIndex));
-				}
-				// To-Do : VertexInfluence 계산값을 MeshInfo에 추가
+				if (ControlPointIndex < 0 || ControlPointIndex >= Mesh->GetControlPointsCount()) continue;
+				if (Weight <= 0.0f) continue;
 
+				FBoneInfluence& Influence = InfluenceByControlPoint[ControlPointIndex];
+				Influence.BoneIndices.Add(*BoneIndex);
+				Influence.BoneWeights.Add(Weight);
 			}
 		}
 	}
-	return MeshInfo;
+
 }
 
-FFbxBoneInfo FFbxImporter::ProcessSkeleton(FbxNode* Node, FbxSkeleton* Skeleton, TMap<FbxNode*, int32>& ParentMap)
+FSkeletalMesh FFbxImporter::ProcessMesh(FbxMesh* Mesh, const TMap<FbxNode*, int32>& BoneIndexByNode)
 {
-	FFbxBoneInfo BoneInfo;
-	BoneInfo.BoneName = Node->GetName();
-	FbxNode* ParentNode = Node->GetParent();
-	const int32* Found = ParentMap.Find(ParentNode);
-	BoneInfo.ParentIndex = Found ? *Found : -1;
-	BoneInfo.RefTransform;
-	return BoneInfo;
+	FSkeletalMesh SkeletalMesh;
+	TMap<int32, FBoneInfluence> InfluenceByControlPoint;
+	BuildInfluenceMap(Mesh, BoneIndexByNode, InfluenceByControlPoint);
+	BuildMeshVerticesAndIndices(Mesh, InfluenceByControlPoint, SkeletalMesh);
+	return SkeletalMesh;
 }
 
-void FFbxImporter::ProcessEtc(FbxNode* Node)
+FSkeletalBone FFbxImporter::ProcessSkeleton(FbxNode* Node, const TMap<FbxNode*, int32>& BoneIndexByNode)
 {
 
 }
 
-void FFbxImporter::Cook(const FFbxMeshInfo& RawMesh, const FFbxSkeletalMeshInfo& RawBone, FSkeletalMeshData& Out)
+void FFbxImporter::Cook(const FFbxImportResult& ImportResult, FSkeletalMeshData& OutData)
 {
 
+}
+
+void FFbxImporter::BuildMeshVerticesAndIndices(FbxMesh* Mesh,const TMap<int32, FBoneInfluence>& InfluenceByControlPoint,FSkeletalMesh& SkeletalMesh)
+{
+	if (!Mesh) return;
+
+	FbxStringList UVSetNames;
+	Mesh->GetUVSetNames(UVSetNames); // UV 추출을 위한 UVSet 이름 넣어두기
+	TMap<FFbxVertexKey, int32, FFbxVertexKeyHash> VertexCache;
+
+	for (int i = 0; i < Mesh->GetPolygonCount(); i++) // 전체 Polygon 순회
+	{
+		if (Mesh->GetPolygonSize(i) == 3)
+		{
+			for (int j = 0; j < 3; j++)	// Polygon 내부의 점 순회, Polygon은 삼각형화에 의해 삼각형으로 고정됨
+			{
+				int ControlPointIndex = Mesh->GetPolygonVertex(i, j);
+				FbxVector4 FbxVertex = Mesh->GetControlPointAt(ControlPointIndex);
+				FSkeletalVertex SkeletalVertex;
+				FVertex& Vertex = SkeletalVertex.Vertex;
+				Vertex.Position = FVector(static_cast<float>(FbxVertex[0]), static_cast<float>(FbxVertex[1]), static_cast<float>(FbxVertex[2]));
+
+				FbxVector4 Normal;
+				bool bNormal = Mesh->GetPolygonVertexNormal(i, j, Normal);
+				if (bNormal) Vertex.Normal = FVector(static_cast<float>(Normal[0]), static_cast<float>(Normal[1]), static_cast<float>(Normal[2]));
+
+				if (UVSetNames.GetCount() > 0) // UVSet이 존재할 때 체크
+				{
+					FbxVector2 UV;
+					bool bUnmapped = false;
+					bool bSuccess = Mesh->GetPolygonVertexUV(i, j, UVSetNames.GetStringAt(0), UV, bUnmapped);
+					if (bSuccess && !bUnmapped)
+					{
+						Vertex.UV = FVector2(static_cast<float>(UV[0]), static_cast<float>(UV[1]));
+					}
+				}
+
+				FFbxVertexKey Key{ ControlPointIndex, Vertex.Normal.X, Vertex.Normal.Y, Vertex.Normal.Z, Vertex.UV.X, Vertex.UV.Y };
+				if (const int32* Found = VertexCache.Find(Key))
+				{
+					SkeletalMesh.Indices.Add(static_cast<uint32>(*Found));	// 같은 정점이면 기존 정점의 인덱스만 추가
+				}
+				else // 다른 정점이면 본 정보를 채우고 새 정점으로 추가
+				{
+					if (const FBoneInfluence* Influence = InfluenceByControlPoint.Find(ControlPointIndex))
+					{
+						// 큰 가중치부터 최대 4개만 유지한다.
+						for (int InfluenceIndex = 0; InfluenceIndex < Influence->BoneIndices.Num(); ++InfluenceIndex)
+						{
+							const float Weight = Influence->BoneWeights[InfluenceIndex];
+							for (int Slot = 0; Slot < 4; ++Slot)
+							{
+								if (Weight > SkeletalVertex.BoneWeights[Slot])
+								{
+									for (int Shift = 3; Shift > Slot; --Shift)
+									{
+										SkeletalVertex.BoneIndices[Shift] = SkeletalVertex.BoneIndices[Shift - 1];
+										SkeletalVertex.BoneWeights[Shift] = SkeletalVertex.BoneWeights[Shift - 1];
+									}
+									SkeletalVertex.BoneIndices[Slot] = static_cast<uint32>(Influence->BoneIndices[InfluenceIndex]);
+									SkeletalVertex.BoneWeights[Slot] = Weight;
+									break;
+								}
+							}
+						}
+
+						float TotalWeight = 0.0f;
+						for (float Weight : SkeletalVertex.BoneWeights) TotalWeight += Weight;
+						if (TotalWeight > 0.0f)
+						{
+							for (float& Weight : SkeletalVertex.BoneWeights) Weight /= TotalWeight;
+						}
+					}
+
+					uint32 NewVertexIndex = static_cast<uint32>(SkeletalMesh.Vertices.Num());
+					SkeletalMesh.Vertices.Add(SkeletalVertex);
+					SkeletalMesh.Indices.Add(NewVertexIndex);
+					VertexCache.Add(Key, static_cast<int32>(NewVertexIndex));
+				}
+			}
+		}
+	}
 }

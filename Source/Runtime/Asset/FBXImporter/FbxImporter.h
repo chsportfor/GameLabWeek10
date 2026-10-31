@@ -1,41 +1,13 @@
 #pragma once
 
 #include "EnginePCH.h"
-#include "Render/Vertex.h"
 #include "Render/SkeletalMeshData.h"
-#include "Math/Transform.h"
 
 #include <fbxsdk.h>
 
-struct FFbxBoneInfluence
-{
-	int32 BoneIndex = -1;
-	float Weight = 0.0f;
-};
+struct FBoneInfluence;
 
-struct FFbxMeshInfo	// Fbx에서 Mesh의 정점, index 정보를 담는 구조체
-{
-	FString Path;
-	TArray<FVertex> Vertices;
-	TArray<uint32> Indices;
-	TMap<int32, TArray<FFbxBoneInfluence>> VertexInfluence;
-};
-
-struct FFbxBoneInfo // Fbx에서 Bone의 이름, 부모 Index를 담는 구조체
-{
-	FString BoneName;
-	int32 ParentIndex = -1;
-	FTransform RefTransform;
-};
-
-struct FFbxSkeletalMeshInfo // Fbx에서 SkeletalMesh의 Bone 정보, Reference Pose의 Transform 정보를 담는 구조체
-{
-	TArray<FFbxBoneInfo> BoneInfoArray;
-};
-
-
-
-struct FFbxIndex	// 중복 정점 체크에 사용되는 Key 값
+struct FFbxVertexKey	// OBJ Import와 동일하게 중복 정점을 파악하기 위해서 사용하는 Key
 {
 	int32 ControlPointIndex = -1;
 
@@ -46,12 +18,12 @@ struct FFbxIndex	// 중복 정점 체크에 사용되는 Key 값
 	float U = 0;
 	float V = 0;
 
-	bool operator==(const FFbxIndex&) const = default;
+	bool operator==(const FFbxVertexKey&) const = default;
 };
 
-struct FFbxIndexHash	// Key 검사 빠르게 진행하기 위한 Hash
+struct FFbxVertexKeyHash	// OBJ Import와 동일하게 중복 정점을 파악하기 위해서 사용하는 KeyHash
 {
-	size_t operator()(const FFbxIndex& Index) const
+	size_t operator()(const FFbxVertexKey& Index) const
 	{
 		size_t Hash = std::hash<int32>{}(Index.ControlPointIndex);
 		Hash = Hash * 31 + std::hash<float>{}(Index.NormalX);
@@ -67,24 +39,26 @@ struct FFbxImportResult	// Fbx의 Import 결과로 나오는 값 구조체
 {
 	bool bSuccess = false;
 
-	TArray<FFbxMeshInfo> Meshes;
-	FFbxSkeletalMeshInfo SkeletalMeshes;
+	// ProcessNode가 순회하면서 수집한 결과. Cook에서 최종 데이터로 묶는다.
+	TArray<FSkeletalMesh> Meshes;
+	TArray<FSkeletalBone> Bones;
 };
-
-
 
 class FFbxImporter
 {
 public:
+
 	FFbxImporter();
 	~FFbxImporter();
 	FFbxImportResult ImportFBX(const FString& Path, const FString& SceneName);
-	void ProcessNode(FbxNode* Node, TMap<FbxNode*, int32>& ParentMap, FFbxImportResult & OutResult);
-	FFbxMeshInfo ProcessMesh(FbxNode* Node, FbxMesh* Mesh);
-	FFbxBoneInfo ProcessSkeleton(FbxNode* Node, FbxSkeleton* Skeleton, TMap<FbxNode*, int32>& ParentMap);
-	void ProcessEtc(FbxNode* Node);
-	void Cook(const FFbxMeshInfo& RawMesh, const FFbxSkeletalMeshInfo& RawBone, FSkeletalMeshData& Out);
+	void ProcessNode(FbxNode* Node, TMap<FbxNode*, int32>& BoneIndexByNode, FFbxImportResult& OutResult);
+	FSkeletalMesh ProcessMesh(FbxMesh* Mesh, const TMap<FbxNode*, int32>& BoneIndexByNode);
+	FSkeletalBone ProcessSkeleton(FbxNode* Node, const TMap<FbxNode*, int32>& BoneIndexByNode);
+	void BuildMeshVerticesAndIndices(FbxMesh* Mesh, const TMap<int32, FBoneInfluence>& InfluenceByControlPoint, FSkeletalMesh& SkeletalMesh);
+	void BuildInfluenceMap(FbxMesh* Mesh, const TMap<FbxNode*, int32>& BoneIndexByNode, TMap<int32, FBoneInfluence>& InfluenceByControlPoint);
+	void Cook(const FFbxImportResult& ImportResult, FSkeletalMeshData& OutData);
+
 
 private:
 	FbxManager* pFbxManager = nullptr;
-}; 
+};
