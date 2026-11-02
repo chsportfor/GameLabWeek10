@@ -6,6 +6,7 @@
 #include "Editor/HitoriEd/EditorResourcePaths.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Components/ParticleSubUVComponent.h"
 #include "Components/LightComponent.h"
@@ -334,6 +335,56 @@ namespace
 			}
 			ImGui::EndCombo();
 		}
+	}
+
+	void DrawSkeletalMeshSlot(UObject* Owner, USkeletalMesh** SkeletalMeshPtr)
+	{
+		USkeletalMesh* Current = *SkeletalMeshPtr;
+		const FString CurrentPath = Current ? Current->GetPath() : "";
+		const FString CurrentName = Current ? GetAssetDisplayName(CurrentPath) : "None";
+		ImGui::SetNextItemWidth(-1.0f);
+		const bool bOpen = ImGui::BeginCombo("##SkeletalMesh", CurrentName.c_str());
+		if (ImGui::IsItemHovered() && Current)
+			ImGui::SetTooltip("%s", CurrentPath.c_str());
+		if (!bOpen) return;
+
+		auto SelectMesh = [Owner, SkeletalMeshPtr](USkeletalMesh* Mesh)
+		{
+			// 버퍼 참조와 Bounds가 갱신되도록 컴포넌트의 설정 함수를 거친다.
+			if (USkeletalMeshComponent* Component = Cast<USkeletalMeshComponent>(Owner))
+				Component->SetSkeletalMesh(Mesh);
+			else
+				*SkeletalMeshPtr = Mesh;
+		};
+		if (ImGui::Selectable("None", Current == nullptr)) SelectMesh(nullptr);
+
+		struct FSkeletalMeshItem
+		{
+			FString DisplayName;
+			FString Path;
+			USkeletalMesh* Mesh;
+		};
+		TArray<FSkeletalMeshItem> Items;
+		for (TObjectIterator<USkeletalMesh> Itr; Itr; ++Itr)
+		{
+			const FString Path = Itr->GetPath();
+			if (!Path.empty()) Items.Add({ GetAssetDisplayName(Path), Path, *Itr });
+		}
+		std::sort(Items.begin(), Items.end(), [](const FSkeletalMeshItem& A, const FSkeletalMeshItem& B)
+		{
+			return _stricmp(A.DisplayName.c_str(), B.DisplayName.c_str()) < 0;
+		});
+		for (const FSkeletalMeshItem& Item : Items)
+		{
+			ImGui::PushID(Item.Mesh);
+			const bool bSelected = Item.Mesh == Current;
+			if (ImGui::Selectable(Item.DisplayName.c_str(), bSelected)) SelectMesh(Item.Mesh);
+			if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", Item.Path.c_str());
+			if (bSelected) ImGui::SetItemDefaultFocus();
+			ImGui::PopID();
+		}
+		if (Items.IsEmpty()) ImGui::TextDisabled("No skeletal meshes loaded");
+		ImGui::EndCombo();
 	}
 
 	void DrawScriptComponentActions(UScriptComponent& ScriptComponent)
@@ -890,6 +941,10 @@ namespace
 			else if (Property.Class == UStaticMesh::StaticClass())
 			{
 				DrawMeshSlot(Object, reinterpret_cast<UStaticMesh**>(ObjPtr));
+			}
+			else if (Property.Class == USkeletalMesh::StaticClass())
+			{
+				DrawSkeletalMeshSlot(Object, reinterpret_cast<USkeletalMesh**>(ObjPtr));
 			}
 			break;
 		}

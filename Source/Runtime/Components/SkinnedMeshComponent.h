@@ -4,4 +4,5 @@
 
 class USkinnedMeshComponent : public UMeshComponent
 {
+	DECLARE_CLASS(USkinnedMeshComponent, UMeshComponent)
 };

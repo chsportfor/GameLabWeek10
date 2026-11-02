@@ -7,6 +7,12 @@
 
 class USkeletalMeshComponent : public USkinnedMeshComponent
 {
+	DECLARE_CLASS(USkeletalMeshComponent, USkinnedMeshComponent)
+
+	REFLECT_START(USkeletalMeshComponent)
+		PROPERTY(SkeletalMesh)
+	REFLECT_END()
+
 public:
 	FPrimitiveSceneProxy* CreateSceneProxy() override;
 	USkeletalMesh* GetSkeletalMesh() const { return SkeletalMesh; }
