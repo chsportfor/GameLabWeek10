@@ -23,6 +23,19 @@ struct FRenderPacket
     uint32 Slot = InvalidObjectSlot;
     uint8 LODIndex = 0;
     bool bOccludedByGpu = false;
+
+    // 스켈레탈 메시와 CPU 스키닝 결과는 StaticMesh 에셋 없이 버퍼를 직접 전달한다.
+    FVertexBuffer* VertexBuffer = nullptr;
+    FIndexBuffer* IndexBuffer = nullptr;
+
+    FVertexBuffer* GetVertexBuffer() const
+    {
+        return VertexBuffer ? VertexBuffer : Mesh ? Mesh->GetVertexBuffer(LODIndex) : nullptr;
+    }
+    FIndexBuffer* GetIndexBuffer() const
+    {
+        return IndexBuffer ? IndexBuffer : Mesh ? Mesh->GetIndexBuffer(LODIndex) : nullptr;
+    }
 };
 
 // Shared bindings, with one ordinary indexed draw per item.
