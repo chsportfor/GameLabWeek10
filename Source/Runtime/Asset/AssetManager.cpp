@@ -288,6 +288,10 @@ void UAssetManager::LoadAsset(const FString& Key, const FString& Path) {
 	if (Extension == ".obj") {
 		LoadObjStaticMesh(Path);
 	}
+	if (Extension == ".fbx")
+	{
+		LoadFbxSkeletonMesh(Path);
+	}
 }
 
 void UAssetManager::CreateDefaultTextures() {
