@@ -9,6 +9,8 @@
 #include <functional>
 
 class UStaticMesh;
+class USkeletalMesh;
+struct FSkeletalMeshData;
 class FShader;
 
 namespace fs = std::filesystem;
@@ -57,6 +59,9 @@ public:
 	UTexture2D* LoadTexture(const FString& InPath, bool bGenerateMips = true);
 	UFont* LoadFontAtlas(const FString& JsonPath, const FString& AtlasTexturePath);
 	static UStaticMesh* LoadObjStaticMesh(const FString& Path);
+	static UStaticMesh* LoadFbxStaticMesh(const FString& Path);
+	static USkeletalMesh* CreateSkeletalMesh(const FSkeletalMeshData* MeshData);
+	static USkeletalMesh* LoadFbxSkeletalMesh(const FString& Path);
 
 	FLODGenerateResult GenerateStaticMeshLODs(UStaticMesh& Mesh,const FLODGenerateRequest& Request);
 

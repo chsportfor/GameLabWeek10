@@ -10,6 +10,9 @@
 #include "Render/RenderResourceManager.h"
 
 #include "Asset/ObjImporter/ObjImporter.h"
+#include "Asset/FbxImporter/FbxImporter.h"
+#include "Render/SkeletalMesh.h"
+#include "Render/SkeletalMeshData.h"
 
 #include "Render/GeometryGenerator.h"
 #include "UObject/UObjectGlobals.h"
@@ -191,6 +194,11 @@ void UAssetManager::LoadAsset(const FString& Key, const FString& Path) {
 	}
 	if (Extension == ".obj") {
 		LoadObjStaticMesh(Path);
+	}
+	if (Extension == ".fbx") {
+		if (!LoadFbxSkeletalMesh(Path)) {
+			LoadFbxStaticMesh(Path);
+		}
 	}
 }
 
@@ -413,6 +421,125 @@ UStaticMesh* UAssetManager::LoadObjStaticMesh(const FString& Path)
 
 	TUniquePtr<FStaticMeshData> Data = FObjImporter::LoadStaticMeshData(Path);
 	UStaticMesh* Mesh = CreateStaticMesh(Data.get());   // Data가 nullptr이면 nullptr 반환
+	if (!Mesh)
+	{
+		return nullptr;
+	}
+
+	Get().RegisterAsset(Key, Mesh);
+	return Mesh;
+}
+
+UStaticMesh* UAssetManager::LoadFbxStaticMesh(const FString& Path)
+{
+	const FString Key = MakeAssetKey(Path);
+	if (UStaticMesh* Cached = GetAssetByPath<UStaticMesh>(Key))
+	{
+		return Cached;
+	}
+
+	TUniquePtr<FStaticMeshData> Data = FFbxImporter::LoadStaticMeshData(Path);
+	UStaticMesh* Mesh = CreateStaticMesh(Data.get());
+	if (!Mesh)
+	{
+		return nullptr;
+	}
+
+	Get().RegisterAsset(Key, Mesh);
+	return Mesh;
+}
+
+USkeletalMesh* UAssetManager::CreateSkeletalMesh(const FSkeletalMeshData* MeshData)
+{
+	if (!MeshData || !MeshData->Vertices.Num() || !MeshData->Indices.Num())
+	{
+		return nullptr;
+	}
+
+	FSkeletalMeshData Data = *MeshData;
+
+	if (Data.MaterialSlots.IsEmpty())
+	{
+		FSkeletalMaterialSlot DefaultSlot;
+		DefaultSlot.Name = "Default";
+		Data.MaterialSlots.Add(DefaultSlot);
+	}
+
+	if (Data.Sections.IsEmpty())
+	{
+		FSkelMeshSection DefaultSection;
+		DefaultSection.StartIndex = 0;
+		DefaultSection.IndexCount = static_cast<uint32>(Data.Indices.Num());
+		DefaultSection.MaterialSlotIndex = 0;
+		Data.Sections.Add(DefaultSection);
+	}
+
+	TUniquePtr<FVertexBuffer> VB = RenderCommand::CreateStaticVertexBuffer(
+		Data.Vertices.GetData(),
+		sizeof(FSkeletalVertex) * static_cast<uint32>(Data.Vertices.Num()),
+		sizeof(FSkeletalVertex));
+	TUniquePtr<FIndexBuffer> IB = RenderCommand::CreateStaticIndexBuffer(
+		Data.Indices.GetData(),
+		static_cast<uint32>(Data.Indices.Num()));
+
+	if (!VB || !IB)
+	{
+		return nullptr;
+	}
+
+	USkeletalMesh* Mesh = NewObject<USkeletalMesh>();
+	Mesh->MeshData = std::move(Data);
+	Mesh->VertexBuffer = std::move(VB);
+	Mesh->IndexBuffer = std::move(IB);
+
+	UMaterial* DefaultMaterial = UAssetManager::GetAssetByPath<UMaterial>("DefaultMaterial");
+	if (DefaultMaterial)
+	{
+		for (const FSkeletalMaterialSlot& Slot : Mesh->MeshData.MaterialSlots)
+		{
+			UMaterial* Material = UMaterial::CreateInstance(DefaultMaterial);
+			if (!Material)
+			{
+				continue;
+			}
+
+			Material->BaseColor = Slot.BaseColor;
+			Material->SetBlendState(Material->BaseColor.W < 1.0f ? EBlendState::AlphaBlend : EBlendState::Opaque);
+
+			if (!Slot.DiffuseTexturePath.empty())
+			{
+				UTexture2D* Texture = UAssetManager::Get().LoadTexture(Slot.DiffuseTexturePath);
+				if (Texture)
+				{
+					Material->Textures[0] = Texture;
+				}
+			}
+
+			if (!Slot.NormalTexturePath.empty())
+			{
+				if (UTexture2D* NormalTexture{ UAssetManager::Get().LoadTexture(Slot.NormalTexturePath) })
+				{
+					Material->Textures[1] = NormalTexture;
+				}
+			}
+
+			Mesh->Materials.Add(Material);
+		}
+	}
+
+	return Mesh;
+}
+
+USkeletalMesh* UAssetManager::LoadFbxSkeletalMesh(const FString& Path)
+{
+	const FString Key = MakeAssetKey(Path);
+	if (USkeletalMesh* Cached = GetAssetByPath<USkeletalMesh>(Key))
+	{
+		return Cached;
+	}
+
+	TUniquePtr<FSkeletalMeshData> Data = FFbxImporter::LoadSkeletalMeshData(Path);
+	USkeletalMesh* Mesh = CreateSkeletalMesh(Data.get());
 	if (!Mesh)
 	{
 		return nullptr;

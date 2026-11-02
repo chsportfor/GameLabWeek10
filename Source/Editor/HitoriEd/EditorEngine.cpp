@@ -42,6 +42,7 @@
 // 임시 Shadow 연결을 위한 include
 // TODO : FSceneRenderer 도입 후 옮겨야함
 #include "ProjectedShadowInfo.h"
+#include "Asset/FbxImporter/FbxImporter.h"
 #include <utility>
 #include <algorithm>
 #include "Components/DirectionalLightComponent.h"
@@ -117,6 +118,9 @@ bool UEditorEngine::Init()
 				return true;
 
 			if (ExecShadowResolutionCommand(CommandLine, OutMessage))
+				return true;
+
+			if (ExecFbxCommand(CommandLine, OutMessage))
 				return true;
 
 			return false;
@@ -524,6 +528,41 @@ bool UEditorEngine::ExecShadowResolutionCommand(const FString& CommandLine, FStr
 		return true;
 	OutMessage = std::format("ShadowMap global maximum: {}", Resolution);
 
+	return true;
+}
+
+bool UEditorEngine::ExecFbxCommand(const FString& CommandLine, FString& OutMessage)
+{
+	std::istringstream Input(CommandLine);
+	FString Command, Path;
+	Input >> Command;
+
+	if (_stricmp(Command.c_str(), "FBXINFO") != 0 && _stricmp(Command.c_str(), "IMPORTFBX") != 0)
+		return false;
+
+	std::getline(Input, Path);
+	size_t Start = Path.find_first_not_of(" \t\"");
+	if (Start != FString::npos)
+	{
+		size_t End = Path.find_last_not_of(" \t\"");
+		Path = Path.substr(Start, End - Start + 1);
+	}
+
+	if (Path.empty())
+	{
+		OutMessage = "Usage: fbxinfo <Path/To/Model.fbx>";
+		return true;
+	}
+
+	bool bOk = FFbxImporter::LoadAndPrintFbxScene(Path);
+	if (bOk)
+	{
+		OutMessage = "FBX Scene inspected successfully: " + Path;
+	}
+	else
+	{
+		OutMessage = "Failed to inspect FBX scene (Check Output Log): " + Path;
+	}
 	return true;
 }
 

@@ -56,6 +56,50 @@ IncludeDir["miniaudio"] = "Source/ThirdParty/miniaudio"
 IncludeDir["Sol2"] = "vcpkg_installed/x64-windows/include"
 IncludeDir["LuaJIT"] = "vcpkg_installed/x64-windows/include/luajit"
 
+local function FindFbxSdk()
+	if os.isdir("Source/ThirdParty/FBX/include") and os.isfile("Source/ThirdParty/FBX/include/fbxsdk.h") then
+		return "Source/ThirdParty/FBX"
+	end
+
+	local DefaultPath = "C:/Program Files/Autodesk/FBX/FBX SDK/2020.3.7"
+	if os.isdir(DefaultPath) then
+		return DefaultPath
+	end
+
+	local Matches = os.matchdirs("C:/Program Files/Autodesk/FBX/FBX SDK/*")
+	if Matches and #Matches > 0 then
+		return Matches[#Matches]
+	end
+
+	return nil
+end
+
+local FbxSdkPath = FindFbxSdk()
+local FbxDebugLibDir = nil
+local FbxReleaseLibDir = nil
+
+if FbxSdkPath then
+	print("FBX SDK 발견: " .. FbxSdkPath)
+	IncludeDir["FBX"] = FbxSdkPath .. "/include"
+
+	for _, vs in ipairs({"vs2022", "vs2019", ""}) do
+		local debugCandidate = (vs ~= "") and (FbxSdkPath .. "/lib/" .. vs .. "/x64/debug") or (FbxSdkPath .. "/lib/x64/debug")
+		if os.isdir(debugCandidate) then
+			FbxDebugLibDir = debugCandidate
+			break
+		end
+	end
+	for _, vs in ipairs({"vs2022", "vs2019", ""}) do
+		local releaseCandidate = (vs ~= "") and (FbxSdkPath .. "/lib/" .. vs .. "/x64/release") or (FbxSdkPath .. "/lib/x64/release")
+		if os.isdir(releaseCandidate) then
+			FbxReleaseLibDir = releaseCandidate
+			break
+		end
+	end
+else
+	print("FBX SDK를 찾지 못했습니다. 설치 후 SlnGenerator.bat을 다시 실행하세요.")
+end
+
 -- premake의 filter는 project()를 만나면 초기화된다.
 -- 두 프로젝트가 같은 런타임(/MDd vs /MD)으로 컴파일되지 않으면 링크가 실패하므로
 -- 공통 설정을 함수로 묶어 각 프로젝트에서 호출한다.
@@ -77,6 +121,10 @@ function CommonSettings()
 		"UNICODE",
 		"_UNICODE",
 	}
+
+	if FbxSdkPath then
+		defines { "HAS_FBX_SDK=1" }
+	end
 
 	filter "files:**.hlsl"
 		excludefrombuild "On"
@@ -193,6 +241,10 @@ project "HitoriEngine"
 		"%{IncludeDir.miniaudio}",
 	}
 
+	if IncludeDir["FBX"] then
+		includedirs { "%{IncludeDir.FBX}" }
+	end
+
 	-- D3D 시스템 lib는 exe(HitoriEditor)에서 링크한다. 정적 lib에 넣으면 import lib가 엔진 lib 안에 합쳐져
 	-- /WHOLEARCHIVE로 강제 링크할 때 __NULL_IMPORT_DESCRIPTOR가 중복 정의된다.
 
@@ -243,6 +295,10 @@ project "HitoriEditor"
 		"%{IncludeDir.json}",
 	}
 
+	if IncludeDir["FBX"] then
+		includedirs { "%{IncludeDir.FBX}" }
+	end
+
 	links
 	{
 		"lua51",
@@ -252,8 +308,20 @@ project "HitoriEditor"
 		"d3dcompiler.lib",
 	}
 
+	if FbxSdkPath then
+		links
+		{
+			"libfbxsdk-md.lib",
+			"libxml2-md.lib",
+			"zlib-md.lib",
+			"ws2_32.lib",
+			"wininet.lib",
+			"bcrypt.lib",
+		}
+	end
+
 	filter "files:Source/ThirdParty/ImNeoSequencer/*.cpp"
-		flags { "NoPCH" }
+		enablepch "Off"
 	filter {}
 
 	filter "configurations:Debug or Benchmark_Debug"
@@ -261,6 +329,10 @@ project "HitoriEditor"
 		{
 			"vcpkg_installed/x64-windows/debug/lib",
 		}
+
+		if FbxDebugLibDir then
+			libdirs { FbxDebugLibDir }
+		end
 
 		postbuildcommands
 		{
@@ -272,6 +344,10 @@ project "HitoriEditor"
 		{
 			"vcpkg_installed/x64-windows/lib",
 		}
+
+		if FbxReleaseLibDir then
+			libdirs { FbxReleaseLibDir }
+		end
 
 		postbuildcommands
 		{
