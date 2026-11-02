@@ -214,7 +214,9 @@ void FStaticMeshData::BuildTriangleBVH()
 	TriangleBVH->Build(Elements);
 }
 
-void FStaticMeshData::BuildTangentSpace() {
+
+void BuildMeshTangentSpace(TArray<FVertex>& Vertices, const TArray<uint32>& Indices)
+{
 	const int32 VertexCount{ Vertices.Num() };
 	const int32 IndexCount{ Indices.Num() };
 	constexpr float UVTolerance{ 1.0e-8f };
@@ -225,7 +227,8 @@ void FStaticMeshData::BuildTangentSpace() {
 	TangentSums.SetNum(VertexCount);
 	BitangentSums.SetNum(VertexCount);
 	// 삼각형마다 Tangent, Bitangent를 계산하고 각 정점에 합산
-	for (int32 Index{ 0 }; Index + 2 < IndexCount; Index += 3) {
+	for (int32 Index{ 0 }; Index + 2 < IndexCount; Index += 3)
+	{
 		const uint32 IndexA{ Indices[Index] };
 		const uint32 IndexB{ Indices[Index + 1] };
 		const uint32 IndexC{ Indices[Index + 2] };
@@ -240,7 +243,8 @@ void FStaticMeshData::BuildTangentSpace() {
 		const FVector2 DeltaUV2{ VertexC.UV - VertexA.UV };
 
 		const float Determinant{ DeltaUV1.X * DeltaUV2.Y - DeltaUV1.Y * DeltaUV2.X };
-		if (std::abs(Determinant) <= UVTolerance) {
+		if (std::abs(Determinant) <= UVTolerance)
+		{
 			continue;
 		}
 
@@ -257,18 +261,21 @@ void FStaticMeshData::BuildTangentSpace() {
 	}
 
 	// 각 정점마다 합산된 Tangent, Bitangent를 정규화하고 Handedness를 계산하여 최종 Tangent를 설정
-	for (int32 Index{ 0 }; Index < VertexCount; ++Index) {
+	for (int32 Index{ 0 }; Index < VertexCount; ++Index)
+	{
 		FVertex& Vertex{ Vertices[Index] };
 		const FVector Normal{ Vertex.Normal.GetSafeNormal(VectorToleranceSquared) };
 
-		if (Normal.SizeSquared() <= VectorToleranceSquared) {
+		if (Normal.SizeSquared() <= VectorToleranceSquared)
+		{
 			Vertex.Tangent = FVector4{ 1.0f, 0.0f, 0.0f, 1.0f };
 			continue;
 		}
 
 		FVector Tangent{ TangentSums[Index] - Normal * Normal.Dot(TangentSums[Index]) };
 
-		if (Tangent.SizeSquared() <= VectorToleranceSquared) {
+		if (Tangent.SizeSquared() <= VectorToleranceSquared)
+		{
 			const FVector Axis{ std::abs(Normal.X) < 0.9f ? FVector{ 1.0f, 0.0f, 0.0f } : FVector{ 0.0f, 1.0f, 0.0f } };
 			Tangent = Axis - Normal * Normal.Dot(Axis);
 		}
@@ -278,4 +285,9 @@ void FStaticMeshData::BuildTangentSpace() {
 		const float Handedness{ Normal.Cross(Tangent).Dot(BitangentSums[Index]) < 0.0f ? -1.0f : 1.0f };
 		Vertex.Tangent = FVector4{ Tangent, Handedness };
 	}
+}
+
+void FStaticMeshData::BuildTangentSpace()
+{
+	BuildMeshTangentSpace(Vertices, Indices);
 }

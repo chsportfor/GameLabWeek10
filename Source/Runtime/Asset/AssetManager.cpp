@@ -155,9 +155,11 @@ namespace
 
 		if (RenderVertices.IsEmpty() || RenderIndices.IsEmpty()) return nullptr;
 
+		BuildMeshTangentSpace(RenderVertices, RenderIndices);
 
 		TUniquePtr<FVertexBuffer> VB = RenderCommand::CreateStaticVertexBuffer(RenderVertices.GetData(), sizeof(FVertex) * static_cast<uint32>(RenderVertices.size()), sizeof(FVertex));
 		TUniquePtr<FIndexBuffer> IB = RenderCommand::CreateStaticIndexBuffer(RenderIndices.GetData(), static_cast<uint32>(RenderIndices.size()));
+		
 		if (VB == nullptr || IB == nullptr) return nullptr;
 
 		USkeletalMesh* Mesh = NewObject<USkeletalMesh>();
