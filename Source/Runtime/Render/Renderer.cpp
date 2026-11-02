@@ -1238,8 +1238,9 @@ void FRenderer::UpdatePerObjectConstants(const FRenderPacket& RenderPacket, cons
 	// rp.Transform 과 Camera VP 행렬 곱
 	// 행렬곱의 결과 (MVP Matrix) Constant Buffer 업데이트 필요
 
-	UpdatePerObjectConstants(GetPacketWorld(RenderPacket),	RenderPacket.Proxy && 
-		RenderPacket.Proxy->IsShadowReceiver(), RenderPacket.Proxy->IsDecalReceiver());
+	UpdatePerObjectConstants(GetPacketWorld(RenderPacket),	
+		RenderPacket.Proxy && RenderPacket.Proxy->IsShadowReceiver(), 
+		RenderPacket.Proxy && RenderPacket.Proxy->IsDecalReceiver());
 }
 
 void FRenderer::UpdatePerObjectConstants(const FMatrix& World, bool bReceiveShadow, bool bReceiveDecal)

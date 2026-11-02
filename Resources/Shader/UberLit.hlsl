@@ -198,7 +198,7 @@ struct VS_OUTPUT
     nointerpolation uint ReceivesDecal : TEXCOORD2;
 #if defined(LIGHTING_MODEL_LAMBERT) || defined(LIGHTING_MODEL_BLINN_PHONG)
     // 물체별 정수 설정은 삼각형 내부에서 보간하지 않는다.
-    nointerpolation uint ReceivesShadow : TEXCOORD2;
+    nointerpolation uint ReceivesShadow : TEXCOORD3;
 #endif
 #if LIGHTING_MODEL_GOURAUD
     float3 VertexDiffuse : COLOR1;   // 정점에서 미리 계산한 Diffuse 조명
