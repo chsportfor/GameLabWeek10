@@ -1,7 +1,55 @@
 #include "EnginePCH.h"
 #include "FbxImporter.h"
 #include <cmath>
+#include <filesystem>
 #include <stdexcept>
+
+namespace
+{
+	std::filesystem::path MakeUTF8Path(const FString& Path)
+	{
+		return std::filesystem::path(std::u8string(Path.begin(), Path.end()));
+	}
+
+	FString ResolveTexturePath(FbxFileTexture* Texture, const FString& FbxPath)
+	{
+		if (!Texture) return {};
+
+		std::error_code Error;
+		const auto FbxDirectory = std::filesystem::absolute(MakeUTF8Path(FbxPath), Error).parent_path();
+		if (Error)
+		{
+			HTR_LOG(Warning, "[FBX] Cannot resolve FBX directory: {}", FbxPath);
+			return {};
+		}
+
+		const auto FilePath = MakeUTF8Path(Texture->GetFileName());
+		const auto RelativePath = MakeUTF8Path(Texture->GetRelativeFileName());
+		auto FindFile = [&Error](const std::filesystem::path& Candidate) -> FString
+		{
+			if (Candidate.empty() || !Candidate.is_absolute()) return {};
+			Error.clear();
+			if (!std::filesystem::is_regular_file(Candidate, Error) || Error) return {};
+			const auto UTF8Path = Candidate.lexically_normal().generic_u8string();
+			return FString(UTF8Path.begin(), UTF8Path.end());
+		};
+
+		// 원래 절대경로를 우선 사용하고, 파일이 이동했다면 FBX 폴더 기준으로 찾는다.
+		FString Resolved = FindFile(FilePath);
+		if (Resolved.empty() && !RelativePath.empty() && RelativePath.is_relative())
+			Resolved = FindFile(FbxDirectory / RelativePath);
+		if (Resolved.empty() && !FilePath.empty() && FilePath.is_relative())
+			Resolved = FindFile(FbxDirectory / FilePath);
+		if (Resolved.empty() && !FilePath.filename().empty())
+			Resolved = FindFile(FbxDirectory / FilePath.filename());
+		if (Resolved.empty() && !RelativePath.filename().empty())
+			Resolved = FindFile(FbxDirectory / RelativePath.filename());
+		if (Resolved.empty())
+			HTR_LOG(Warning, "[FBX] Texture file not found: '{}' (relative: '{}', FBX: '{}')",
+				Texture->GetFileName(), Texture->GetRelativeFileName(), FbxPath);
+		return Resolved;
+	}
+}
 
 struct FBoneInfluence
 {
@@ -115,7 +163,7 @@ FFbxImportResult FFbxImporter::ImportFBX(const FString& Path, const FString& Sce
 			// 모든 본의 번호가 준비된 후 MeshNode 순회 진행
 			for (int i = 0; i < pFbxRootNode->GetChildCount(); i++)
 			{
-				ProcessMeshNode(pFbxRootNode->GetChild(i), BoneIndexByNode, FbxResult);
+				ProcessMeshNode(pFbxRootNode->GetChild(i), BoneIndexByNode, FbxResult, Path);
 			}
 		}
 	}
@@ -150,7 +198,7 @@ void FFbxImporter::ProcessSkeletonNode(FbxNode* Node, TMap<FbxNode*, int32>& Bon
 	}
 }
 
-void FFbxImporter::ProcessMeshNode(FbxNode* Node, const TMap<FbxNode*, int32>& BoneIndexByNode, FFbxImportResult& OutResult)
+void FFbxImporter::ProcessMeshNode(FbxNode* Node, const TMap<FbxNode*, int32>& BoneIndexByNode, FFbxImportResult& OutResult, const FString& FbxPath)
 {
 	if (!Node) return;
 
@@ -160,13 +208,13 @@ void FFbxImporter::ProcessMeshNode(FbxNode* Node, const TMap<FbxNode*, int32>& B
 		if (NodeAttri && NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eMesh)
 		{
 			FbxMesh* Mesh = static_cast<FbxMesh*>(NodeAttri);
-			FSkeletalMesh SkeletalMesh = ProcessMesh(Mesh, BoneIndexByNode);
+			FSkeletalMesh SkeletalMesh = ProcessMesh(Mesh, BoneIndexByNode, FbxPath);
 			OutResult.Meshes.Add(SkeletalMesh);
 		}
 	}
 	for (int i = 0; i < Node->GetChildCount(); ++i) // 연결된 자식에 대해서 재귀적으로 순회
 	{
-		ProcessMeshNode(Node->GetChild(i), BoneIndexByNode, OutResult);
+		ProcessMeshNode(Node->GetChild(i), BoneIndexByNode, OutResult, FbxPath);
 	}
 }
 
@@ -217,12 +265,14 @@ void FFbxImporter::BuildInfluenceMap(FbxMesh* Mesh, const TMap<FbxNode*, int32>&
 
 }
 
-FSkeletalMesh FFbxImporter::ProcessMesh(FbxMesh* Mesh, const TMap<FbxNode*, int32>& BoneIndexByNode)
+FSkeletalMesh FFbxImporter::ProcessMesh(FbxMesh* Mesh, const TMap<FbxNode*, int32>& BoneIndexByNode, const FString& FbxPath)
 {
 	FSkeletalMesh SkeletalMesh;
 	TMap<int32, FBoneInfluence> InfluenceByControlPoint;
 	BuildInfluenceMap(Mesh, BoneIndexByNode, InfluenceByControlPoint);	// Control Point - Influence간 연결 Map을 완성
+	BuildMaterials(Mesh, SkeletalMesh, FbxPath);	// Mesh 안의 Material 정보 Slot에 저장
 	BuildMeshVerticesAndIndices(Mesh, InfluenceByControlPoint, SkeletalMesh);	// 이후 정점 추가 과정에서 ControlPoint에 맞춰 Vertex 정보 추가하면서 같이 추가
+
 	return SkeletalMesh;
 }
 
@@ -312,10 +362,51 @@ void FFbxImporter::BuildMeshVerticesAndIndices(FbxMesh* Mesh,const TMap<int32, F
 	Mesh->GetUVSetNames(UVSetNames); // UV 추출을 위한 UVSet 이름 넣어두기
 	TMap<FFbxVertexKey, int32, FFbxVertexKeyHash> VertexCache;
 
+	if (SkeletalMesh.MaterialSlots.IsEmpty())
+	{
+		FSkeletalMaterialSlot DefaultSlot;
+		DefaultSlot.Name = "Default";
+		SkeletalMesh.MaterialSlots.Add(DefaultSlot);
+	}
+	FbxGeometryElementMaterial* MaterialElement = Mesh->GetElementMaterial(0);	// Polygon - Material 간의 연결 정보
+	const auto MappingMode = MaterialElement ? MaterialElement->GetMappingMode() : FbxGeometryElement::eNone;
+	bool bWarnedInvalidMaterial = false;
+
 	for (int i = 0; i < Mesh->GetPolygonCount(); i++) // 전체 Polygon 순회
 	{
 		if (Mesh->GetPolygonSize(i) == 3)
 		{
+			int MaterialIndex = 0;
+			bool bValidMaterial = false;
+			if (MaterialElement && (MappingMode == FbxGeometryElement::eAllSame || MappingMode == FbxGeometryElement::eByPolygon))
+			{
+				const int MaterialMappingIndex = MappingMode == FbxGeometryElement::eAllSame ? 0 : i; // eAllSame일 경우 Polygon-Material 매핑 배열에서 첫번째만 읽음, eByPolygon이면 면의 index를 따라감
+				if (MaterialMappingIndex < MaterialElement->GetIndexArray().GetCount())
+				{
+					const int MappedIndex = MaterialElement->GetIndexArray().GetAt(MaterialMappingIndex);	// 현재 계산하고 있는 Polygon이 사용하는 Material의 index 읽음
+					if (MappedIndex >= 0 && MappedIndex < SkeletalMesh.MaterialSlots.Num())
+					{
+						MaterialIndex = MappedIndex;
+						bValidMaterial = true;
+					}
+				}
+			}
+			if (MaterialElement && !bValidMaterial && !bWarnedInvalidMaterial)
+			{
+				HTR_LOG(Warning, "[FBX] Invalid or unsupported material mapping on mesh '{}'; using slot 0", Mesh->GetName());
+				bWarnedInvalidMaterial = true;
+			}
+			int SectionNum = SkeletalMesh.Sections.Num();
+			if (SectionNum == 0 || SkeletalMesh.Sections[SectionNum - 1].MaterialSlotIndex != MaterialIndex)	// Section이 현재 존재하지 않거나, 이전 Section과 Material이 달라졌을경우 Section 추가
+			{
+				FSkeletalMeshSection Section;
+				Section.StartIndex = static_cast<uint32>(SkeletalMesh.Indices.Num());
+				Section.MaterialSlotIndex = MaterialIndex;
+				Section.IndexCount = 3;
+				SkeletalMesh.Sections.Add(Section);
+			}
+			else SkeletalMesh.Sections[SectionNum - 1].IndexCount += 3;	// Section이 그대로일때는 삼각형만큼 index 추가
+
 			for (int j = 0; j < 3; j++)	// Polygon 내부의 점 순회, Polygon은 삼각형화에 의해 삼각형으로 고정됨
 			{
 				int ControlPointIndex = Mesh->GetPolygonVertex(i, j);
@@ -383,5 +474,53 @@ void FFbxImporter::BuildMeshVerticesAndIndices(FbxMesh* Mesh,const TMap<int32, F
 				}
 			}
 		}
+	}
+}
+
+void FFbxImporter::BuildMaterials(FbxMesh* Mesh, FSkeletalMesh& SkeletalMesh, const FString& FbxPath)
+{
+	FbxNode* Node = Mesh ? Mesh->GetNode() : nullptr;
+	const int MaterialCount = Node ? Node->GetMaterialCount() : 0;
+	for (int i = 0; i < MaterialCount; i++)	// 한 Node 내에 존재하는 전체 Material 순회
+	{
+		FbxSurfaceMaterial* FbxMat = Node->GetMaterial(i);
+		FSkeletalMaterialSlot Slot;
+		if (FbxMat != nullptr)
+		{
+			Slot.Name = FbxMat->GetName();
+			FbxProperty DiffuseProperty = FbxMat->FindProperty(FbxSurfaceMaterial::sDiffuse);	// Diffuse Property를 가져옴
+			FbxProperty NormalProperty = FbxMat->FindProperty(FbxSurfaceMaterial::sNormalMap); // Normal Property를 가져옴
+			if (DiffuseProperty.IsValid())
+			{
+				FbxDouble3 Color = DiffuseProperty.Get<FbxDouble3>();	// Property 존재시 Color 정보 가져와 Slot에 저장
+				Slot.BaseColor = FVector4(Color[0], Color[1], Color[2], 1.0f);
+				if (DiffuseProperty.GetSrcObjectCount<FbxFileTexture>() > 0)
+				{
+					FbxFileTexture* Texture = DiffuseProperty.GetSrcObject<FbxFileTexture>(0);
+					if (Texture)
+					{
+						Slot.BaseColorTexturePath = ResolveTexturePath(Texture, FbxPath);
+					}
+				}
+			}
+			if (NormalProperty.IsValid())
+			{
+				if (NormalProperty.GetSrcObjectCount<FbxFileTexture>() > 0)
+				{
+					FbxFileTexture* Texture = NormalProperty.GetSrcObject<FbxFileTexture>(0);
+					if (Texture)
+					{
+						Slot.NormalTexturePath = ResolveTexturePath(Texture, FbxPath);
+					}
+				}
+			}
+		}
+		SkeletalMesh.MaterialSlots.Add(Slot);
+	}
+	if (SkeletalMesh.MaterialSlots.IsEmpty())
+	{
+		FSkeletalMaterialSlot DefaultSlot;
+		DefaultSlot.Name = "Default";
+		SkeletalMesh.MaterialSlots.Add(DefaultSlot);
 	}
 }

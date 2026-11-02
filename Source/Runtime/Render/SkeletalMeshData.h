@@ -18,11 +18,27 @@ struct FSkeletalBone
 	FTransform RefPoseTransform;
 };
 
-// 메시 하나의 정점과 삼각형 연결 정보.
+struct FSkeletalMaterialSlot
+{
+	FString Name;
+	FVector4 BaseColor = FVector4(1, 1, 1, 1);
+	FString BaseColorTexturePath;
+	FString NormalTexturePath;
+};
+
+struct FSkeletalMeshSection
+{
+	uint32 StartIndex = 0;
+	uint32 IndexCount = 0;
+	uint32 MaterialSlotIndex = 0;
+};
+
 struct FSkeletalMesh
 {
 	TArray<FSkeletalVertex> Vertices;
 	TArray<uint32> Indices;
+	TArray<FSkeletalMeshSection> Sections;
+	TArray<FSkeletalMaterialSlot> MaterialSlots;
 };
 
 // 메시 파트들과 공통 본 목록.

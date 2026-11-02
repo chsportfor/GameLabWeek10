@@ -52,11 +52,12 @@ public:
 	~FFbxImporter();
 	FFbxImportResult ImportFBX(const FString& Path, const FString& SceneName);
 	void ProcessSkeletonNode(FbxNode* Node, TMap<FbxNode*, int32>& BoneIndexByNode, FFbxImportResult& OutResult);
-	void ProcessMeshNode(FbxNode* Node, const TMap<FbxNode*, int32>& BoneIndexByNode, FFbxImportResult& OutResult);
-	FSkeletalMesh ProcessMesh(FbxMesh* Mesh, const TMap<FbxNode*, int32>& BoneIndexByNode);
+	void ProcessMeshNode(FbxNode* Node, const TMap<FbxNode*, int32>& BoneIndexByNode, FFbxImportResult& OutResult, const FString& FbxPath);
+	FSkeletalMesh ProcessMesh(FbxMesh* Mesh, const TMap<FbxNode*, int32>& BoneIndexByNode, const FString& FbxPath);
 	FSkeletalBone ProcessSkeleton(FbxNode* Node, const TMap<FbxNode*, int32>& BoneIndexByNode);
 	void BuildMeshVerticesAndIndices(FbxMesh* Mesh, const TMap<int32, FBoneInfluence>& InfluenceByControlPoint, FSkeletalMesh& SkeletalMesh);
 	void BuildInfluenceMap(FbxMesh* Mesh, const TMap<FbxNode*, int32>& BoneIndexByNode, TMap<int32, FBoneInfluence>& InfluenceByControlPoint);
+	void BuildMaterials(FbxMesh* Mesh, FSkeletalMesh& SkeletalMesh, const FString& FbxPath);
 	void Cook(const FFbxImportResult& ImportResult, FSkeletalMeshData& OutData);
 
 
