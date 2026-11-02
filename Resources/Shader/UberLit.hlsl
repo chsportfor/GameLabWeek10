@@ -105,7 +105,8 @@ cbuffer PerObjectConstants : register(b2)
     matrix World;
     matrix WorldInverseTranspose; // (World^-1)^T
     uint ReceiveShadow;
-    uint3 ObjectPadding;
+    uint ReceiveDecal;
+    uint2 ObjectPadding;
 };
 
 // b3는 쓰지 않는다.
@@ -194,6 +195,7 @@ struct VS_OUTPUT
     float4 Tangent : TANGENT;
     float2 UV : TEXCOORD0;
     float4 Color : COLOR;
+    nointerpolation uint ReceivesDecal : TEXCOORD2;
 #if defined(LIGHTING_MODEL_LAMBERT) || defined(LIGHTING_MODEL_BLINN_PHONG)
     // 물체별 정수 설정은 삼각형 내부에서 보간하지 않는다.
     nointerpolation uint ReceivesShadow : TEXCOORD2;
@@ -830,6 +832,7 @@ VS_OUTPUT mainVS(VS_INPUT Input)
 
     Output.UV = Input.UV;
     Output.Color = Input.Color;
+    Output.ReceivesDecal = ReceiveDecal;
 #if defined(LIGHTING_MODEL_LAMBERT) || defined(LIGHTING_MODEL_BLINN_PHONG)
     // 기존 b2의 VS 전용 바인딩을 유지하면서 PS에 전달한다.
     Output.ReceivesShadow = ReceiveShadow;
@@ -880,7 +883,7 @@ float4 mainPS(VS_OUTPUT Input) : SV_TARGET
     // 에디터 화살표는 톤 매핑 이후 LDR 타깃에 그려지므로 sRGB 그대로 둔다.
     Albedo.rgb = SRGBToLinear(TexColor.rgb) * SRGBToLinear(BaseColor.rgb);
     
-    if (bOpaque > 0.5f)
+    if (Input.ReceivesDecal && bOpaque > 0.5f)
     {
         const float4 Decal = DBuffer.Load(int3(Input.SvPosition.xy, 0));
         Albedo.rgb = Albedo.rgb * (1.0f - Decal.a) + Decal.rgb;

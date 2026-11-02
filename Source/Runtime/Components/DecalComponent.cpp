@@ -16,16 +16,31 @@ UTexture2D* UDecalComponent::GetDecalTexture() const
 void UDecalComponent::SetDecalTexture(UTexture2D* InDecalTexture)
 {
 	DecalTexture = InDecalTexture;
+	MarkRenderStateDirty();
 }
 
 void UDecalComponent::SetDecalColor(const FLinearColor& InDecalColor)
 {
 	DecalColor = InDecalColor;
+	MarkRenderStateDirty();
 }
 
 void UDecalComponent::SetSortOrder(int32 InSortOrder)
 {
 	SortOrder = InSortOrder;
+	MarkRenderStateDirty();
+}
+
+void UDecalComponent::SetDecalSize(const FVector& InDecalSize)
+{
+	DecalSize = InDecalSize;
+	OnTransformDirty();
+}
+
+void UDecalComponent::SetAdditive(bool bInAdditive)
+{
+	bAdditive = bInAdditive;
+	MarkRenderStateDirty();
 }
 
 const FLinearColor& UDecalComponent::GetDecalColor() const
@@ -102,4 +117,38 @@ void UDecalComponent::DestroyRenderState()
 void UDecalComponent::Serialize(json& Handle, bool bIsLoading)
 {
 	Super::Serialize(Handle, bIsLoading);
+
+	if (bIsLoading)
+	{
+		OnTransformDirty();
+		MarkRenderStateDirty();
+	}
+}
+
+// Reflection 편집은 Setter를 거치지 않으므로 프록시 갱신을 직접 예약한다.
+void UDecalComponent::PostEditChangeProperty(const FProperty& Property)
+{
+	Super::PostEditChangeProperty(Property);
+
+	if (Property.Name == "DecalSize")
+	{
+		OnTransformDirty();
+	}
+	else if (Property.Name == "DecalTexture" || Property.Name == "DecalColor"
+		|| Property.Name == "SortOrder" || Property.Name == "bAdditive")
+	{
+		MarkRenderStateDirty();
+	}
+}
+
+void UDecalComponent::OnTransformDirty()
+{
+	if (SceneProxy)
+		SceneProxy->GetScene()->MarkDecalDirty(SceneProxy);
+}
+
+void UDecalComponent::MarkRenderStateDirty()
+{
+	if (SceneProxy)
+		SceneProxy->GetScene()->MarkDecalRenderStateDirty(SceneProxy);
 }

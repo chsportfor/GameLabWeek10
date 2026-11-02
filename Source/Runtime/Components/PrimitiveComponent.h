@@ -30,6 +30,7 @@ class UPrimitiveComponent :public USceneComponent
 		PROPERTY(bVisible)
 		PROPERTY(bCastShadow)
 		PROPERTY(bReceiveShadow)
+		PROPERTY(bReceiveDecal)
 		PROPERTY(bGenerateOverlapEvents)
 		PROPERTY(bBlockComponent)
 		REFLECT_END()
@@ -70,6 +71,7 @@ public:
 
 	bool IsShadowCaster() const { return bCastShadow; }
 	bool IsShadowReceiver() const { return bReceiveShadow; }
+	bool IsDecalReceiver() const { return bReceiveDecal; }
 
 	void SetCastShadow(bool bInCastShadow)
 	{
@@ -80,6 +82,12 @@ public:
 	void SetReceiveShadow(bool bInReceiveShadow)
 	{
 		bReceiveShadow = bInReceiveShadow;
+		MarkRenderStateDirty();
+	}
+
+	void SetReceiveDecal(bool bInReceiveDecal)
+	{
+		bReceiveDecal = bInReceiveDecal;
 		MarkRenderStateDirty();
 	}
 
@@ -126,4 +134,5 @@ private:
 	FPrimitiveSceneProxy* SceneProxy = nullptr;
 	bool bCastShadow = true;
 	bool bReceiveShadow = true;
+	bool bReceiveDecal = true;
 };

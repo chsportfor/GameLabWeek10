@@ -160,7 +160,8 @@ void FRenderer::UploadPerObjectConstants()
 		FRenderPacket& P = RenderPackets[Index];
 		const FMatrix& Model = GetPacketWorld(P);
 		const FMatrix WorldToLocal = P.Proxy ? P.Proxy->GetWorldToLocal() : Model.Inverse();
-		WritePerObjectConstants(Dest + static_cast<size_t>(Index) * ObjectSlotBytes, Model, WorldToLocal, P.Proxy && P.Proxy->IsShadowReceiver());
+		WritePerObjectConstants(Dest + static_cast<size_t>(Index) * ObjectSlotBytes, 
+			Model, WorldToLocal, P.Proxy && P.Proxy->IsShadowReceiver(), P.Proxy && P.Proxy->IsDecalReceiver());
 		P.Slot = Index;
 	}
 
@@ -513,7 +514,7 @@ void FRenderer::DrawStaticGroups()
 			else
 			{
 				RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
-				UpdatePerObjectConstants(Item.Proxy->GetLocalToWorld(), Item.Proxy->IsShadowReceiver());
+				UpdatePerObjectConstants(Item.Proxy->GetLocalToWorld(), Item.Proxy->IsShadowReceiver(), Item.Proxy->IsDecalReceiver());
 			}
 			RenderCommand::DrawIndexed(Item.IndexCount, Item.StartIndex);
 		}
@@ -1068,7 +1069,7 @@ FOcclusionMeasureResult FRenderer::MeasureOpaqueOcclusion(const FMatrix& ViewPro
 		else
 		{
 			RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
-			UpdatePerObjectConstants(*Draw.World, false);
+			UpdatePerObjectConstants(*Draw.World, false, false);
 		}
 
 		ID3D11Query* Query = OcclusionQueries[Index].Get();
@@ -1237,15 +1238,17 @@ void FRenderer::UpdatePerObjectConstants(const FRenderPacket& RenderPacket, cons
 	// rp.Transform 과 Camera VP 행렬 곱
 	// 행렬곱의 결과 (MVP Matrix) Constant Buffer 업데이트 필요
 
-	UpdatePerObjectConstants(GetPacketWorld(RenderPacket),	RenderPacket.Proxy && RenderPacket.Proxy->IsShadowReceiver());
+	UpdatePerObjectConstants(GetPacketWorld(RenderPacket),	RenderPacket.Proxy && 
+		RenderPacket.Proxy->IsShadowReceiver(), RenderPacket.Proxy->IsDecalReceiver());
 }
 
-void FRenderer::UpdatePerObjectConstants(const FMatrix& World, bool bReceiveShadow)
+void FRenderer::UpdatePerObjectConstants(const FMatrix& World, bool bReceiveShadow, bool bReceiveDecal)
 {
 	FPerObjectConstants Constants{};
 	Constants.World = World;
 	Constants.NormalMatrix = World.Inverse().GetTransposed();
 	Constants.ReceiveShadow = static_cast<uint32>(bReceiveShadow);
+	Constants.ReceiveDecal = static_cast<uint32>(bReceiveDecal);
 	RenderCommand::UpdateBufferData(PerObjectCB.get(), &Constants);
 }
 

@@ -43,6 +43,7 @@ public:
     bool IsVisible() const { return bVisible; }
     bool IsShadowCaster() const { return bCastShadow; }
     bool IsShadowReceiver() const { return bReceiveShadow; }
+    bool IsDecalReceiver() const { return bReceiveDecal; }
     uint8 GetLODCount() const { return RenderState ? RenderState->LODCount : 1; }
     const FMeshRenderState* GetRenderState() const { return RenderState.get(); }
     const float* GetLODThresholdsSq() const { return RenderState->LODThresholdSq; }
@@ -71,6 +72,7 @@ private:
     bool bVisible = true;
     bool bCastShadow = true;
     bool bReceiveShadow = true;
+    bool bReceiveDecal = true;
     bool bDynamicDataPrepared = false;
     uint64 ShadowVersion = 0u;
 };

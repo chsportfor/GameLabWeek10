@@ -53,13 +53,13 @@ void FDecalRenderer::OnRender(
 
 	TArray<FDecalSceneProxy*> SortDecals = Decals;
 	std::sort(SortDecals.begin(), SortDecals.end(), [](const FDecalSceneProxy* A, const FDecalSceneProxy* B) {
-			if (A->GetDecalComponent()->GetSortOrder() != B->GetDecalComponent()->GetSortOrder())
+			if (A->GetSortOrder() != B->GetSortOrder())
 			{
-				return (A->GetDecalComponent()->GetSortOrder() < B->GetDecalComponent()->GetSortOrder());
+				return (A->GetSortOrder() < B->GetSortOrder());
 			}
-			if (A->GetDecalComponent()->GetDecalTexture() != B->GetDecalComponent()->GetDecalTexture())
+			if (A->GetDecalTexture() != B->GetDecalTexture())
 			{
-				return (A->GetDecalComponent()->GetDecalTexture() < B->GetDecalComponent()->GetDecalTexture());
+				return (A->GetDecalTexture() < B->GetDecalTexture());
 			}
 			return (A < B);
 		});
@@ -77,14 +77,11 @@ void FDecalRenderer::OnRender(
 
 	for (FDecalSceneProxy* DecalSceneProxy : SortDecals)
 	{
-		const FMatrix DecalToWorld = DecalSceneProxy->GetDecalComponent()->GetTransformIncludingDecalSize();
-		DecalConstants.DecalToClip = DecalToWorld * ViewProjection;
-		DecalConstants.DecalInfo.WorldToDecal = DecalToWorld.Inverse();
-		DecalConstants.DecalInfo.DecalColor = DecalSceneProxy->GetDecalComponent()->GetDecalColor();
+		DecalConstants.DecalToClip = DecalSceneProxy->GetDecalToWorld() * ViewProjection;
+		DecalConstants.DecalInfo.WorldToDecal = DecalSceneProxy->GetWorldToDecal();
+		DecalConstants.DecalInfo.DecalColor = DecalSceneProxy->GetDecalColor();
 
-		
-		
-		RenderCommand::BindShaderResource(1, DecalSceneProxy->GetDecalComponent()->GetDecalTexture(), EShaderBindFlagBits::Pixel);
+		RenderCommand::BindShaderResource(1, DecalSceneProxy->GetDecalTexture(), EShaderBindFlagBits::Pixel);
 		RenderCommand::UpdateBufferData(ConstantBuffer.get(), &DecalConstants);
 		RenderCommand::BindConstantBuffer(0, ConstantBuffer.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 		RenderCommand::DrawIndexed(36);

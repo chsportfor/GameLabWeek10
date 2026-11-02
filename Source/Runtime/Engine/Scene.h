@@ -53,6 +53,8 @@ public:
 
 	void MarkDirty(FPrimitiveSceneProxy* Proxy);
 	void MarkRenderStateDirty(FPrimitiveSceneProxy* Proxy);
+	void MarkDecalDirty(FDecalSceneProxy* Proxy);
+	void MarkDecalRenderStateDirty(FDecalSceneProxy* Proxy);
 
 	TArray<FPrimitiveSceneProxy*> PrimitiveSceneProxies;
 	TArray<FPrimitiveSceneProxy*> DirtyProxies;
@@ -75,6 +77,8 @@ public:
 	TArray<FLocalLightSceneProxy*>        LocalLightProxies;      // ↔ PackedIndex ↔
 	TArray<FLightRenderParameters>        LocalLightParameters;   // GPU 업로드용, 같은 순서
 	TArray<FDecalSceneProxy*>			  DecalSceneProxies;
+	TArray<FDecalSceneProxy*>			  DirtyDecalProxies;
+	TArray<FDecalSceneProxy*>			  RenderStateDirtyDecalProxies;
 	TArray<FDirectionalLightSceneProxy*>  DirectionalLightProxies;
 	TArray<USkyLightComponent*>           SkyLights;               // 프록시 없음
 

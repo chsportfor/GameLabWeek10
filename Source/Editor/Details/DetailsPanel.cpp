@@ -212,9 +212,10 @@ namespace
 		ImGui::PopID();
 	}
 
-	void DrawTextureProperty(UTexture2D** TexturePtr)
+	bool DrawTextureProperty(UTexture2D** TexturePtr)
 	{
 		const float ThumbnailSize = 64.0f;
+		bool bChanged = false;
 
 		UTexture2D* Texture = *TexturePtr;
 
@@ -237,6 +238,7 @@ namespace
 			{
 				Texture = *static_cast<UTexture2D**>(Payload->Data);
 				*TexturePtr = Texture;
+				bChanged = true;
 			}
 			ImGui::EndDragDropTarget();
 		}
@@ -255,6 +257,7 @@ namespace
 		ImGui::EndGroup();
 
 		ImGui::PopID();
+		return bChanged;
 	}
 
 	FString GetAssetDisplayName(const FString& Path)
@@ -930,7 +933,7 @@ namespace
 			}
 			else if (Property.Class == UTexture2D::StaticClass())
 			{
-				DrawTextureProperty(reinterpret_cast<UTexture2D**>(ObjPtr));
+				bChanged = DrawTextureProperty(reinterpret_cast<UTexture2D**>(ObjPtr));
 			}
 			else if (Property.Class == UFont::StaticClass())
 			{

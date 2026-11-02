@@ -6,7 +6,6 @@
 class FDecalSceneProxy;
 class FLineBatcher;
 
-
 class UDecalComponent : public USceneComponent
 {
     DECLARE_CLASS(UDecalComponent, USceneComponent)
@@ -16,6 +15,12 @@ class UDecalComponent : public USceneComponent
         PROPERTY(DecalColor)
         PROPERTY(SortOrder)
         PROPERTY(bAdditive)
+        PROPERTY(FadeScreenSize)
+        PROPERTY(FadeStartDelay)
+        PROPERTY(FadeDuration)
+        PROPERTY(FadeInDuration)
+        PROPERTY(FadeInStartDelay)
+        PROPERTY(bDestroyOwnerAfterFade)
     REFLECT_END()
 
 public:
@@ -24,12 +29,17 @@ public:
     void CreateRenderState() override;
     void DestroyRenderState() override;
     void Serialize(json& Handle, bool bIsLoading) override;
+    void PostEditChangeProperty(const FProperty& Property) override;
+    void OnTransformDirty() override;
+    void MarkRenderStateDirty();
     FDecalSceneProxy* CreateSceneProxy() const;
 
     UTexture2D* GetDecalTexture() const;
     void SetDecalTexture(UTexture2D* InDecalTexture);
     void SetDecalColor(const FLinearColor& InDecalColor);
     void SetSortOrder(int32 InSortOrder);
+    void SetDecalSize(const FVector& InDecalSize);
+    void SetAdditive(bool bInAdditive);
 
     const FLinearColor& GetDecalColor() const;
     int32 GetSortOrder() const;
@@ -48,4 +58,15 @@ private:
     FLinearColor        DecalColor = FLinearColor(1, 1, 1, 1);
     int32               SortOrder = 0;
     bool                bAdditive = false;
+
+    // Fade 관련 설정
+    float   FadeScreenSize = 0.01f; // 화면 비율
+    float   FadeStartDelay = 0.0f; // 기준시간(초)
+    float   FadeDuration = 0.0f;
+    float   FadeInDuration = 0.0f;
+    float   FadeInStartDelay = 0.0f;
+    bool    bDestroyOwnerAfterFade = true;
+
+    float   FadeElapsedTime = 0.0f;
+
 };

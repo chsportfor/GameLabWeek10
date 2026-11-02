@@ -26,14 +26,15 @@ struct FPerObjectConstants
 	// (World^-1)^T. 비균등 스케일에서도 노멀이 표면에 수직으로 남도록 노멀 변환에 쓴다.
 	FMatrix NormalMatrix;
 	uint32 ReceiveShadow = 0;
-	uint32 Padding[3]{};
+	uint32 ReceiveDecal = 0;
+	uint32 Padding[2]{};
 };
 static_assert(sizeof(FPerObjectConstants) == 144);
 
 // 오브젝트 칸 하나를 채운다. 프록시는 WorldToLocal을 이미 들고 있어 역행렬 계산을 건너뛸 수 있다.
-inline void WritePerObjectConstants(uint8* Dest, const FMatrix& World, const FMatrix& WorldToLocal, bool bReceiveShadow)
+inline void WritePerObjectConstants(uint8* Dest, const FMatrix& World, const FMatrix& WorldToLocal, bool bReceiveShadow, bool bReceiveDecal)
 {
-	const FPerObjectConstants Constants{ World, WorldToLocal.GetTransposed(), static_cast<uint32>(bReceiveShadow),{} };
+	const FPerObjectConstants Constants{ World, WorldToLocal.GetTransposed(), static_cast<uint32>(bReceiveShadow), static_cast<uint32>(bReceiveDecal),{} };
 	std::memcpy(Dest, &Constants, sizeof(Constants));
 }
 
@@ -332,7 +333,7 @@ private:
 	void BindMaterial(UMaterial* Material);
 	void UpdateMaterialParams(const FRenderPacket& RenderPacket);
 	void UpdatePerObjectConstants(const FRenderPacket& RenderPacket, const FMatrix& ViewProjection);
-	void UpdatePerObjectConstants(const FMatrix& World, bool bReceiveShadow);
+	void UpdatePerObjectConstants(const FMatrix& World, bool bReceiveShadow, bool bReceiveDecal);
 	void EnsurePerObjectSlotCapacity(uint32 SlotCount);
 	void UploadPerObjectConstants();
 

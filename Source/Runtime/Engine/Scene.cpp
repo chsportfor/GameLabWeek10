@@ -159,7 +159,10 @@ void FScene::AddDecal(UDecalComponent* Component)
 	}
 
 	Component->SceneProxy = Proxy;
+	Proxy->Scene = this;
 	Proxy->PackedIndex = DecalSceneProxies.Num();
+	MarkDecalDirty(Proxy);
+	MarkDecalRenderStateDirty(Proxy);
 
 	DecalSceneProxies.Add(Proxy);
 }
@@ -180,6 +183,18 @@ void FScene::RemoveDecal(UDecalComponent* Component)
 	if (Index < DecalSceneProxies.Num())
 		DecalSceneProxies[Index]->PackedIndex = Index;
 
+	if (Proxy->bQueuedForUpdate)
+	{
+		const int32 Found = DirtyDecalProxies.Find(Proxy);
+		if (Found != INDEX_NONE) DirtyDecalProxies.RemoveAtSwap(Found);
+	}
+
+	if (Proxy->bRenderStateQueued)
+	{
+		const int32 Found = RenderStateDirtyDecalProxies.Find(Proxy);
+		if (Found != INDEX_NONE) RenderStateDirtyDecalProxies.RemoveAtSwap(Found);
+	}
+
 	Component->SceneProxy = nullptr;
 	delete Proxy;
 }
@@ -190,8 +205,10 @@ void FScene::RemoveAllDecals()
 	{
 		delete Proxy;
 	}
-	
+
 	DecalSceneProxies.Reset();
+	DirtyDecalProxies.Reset();
+	RenderStateDirtyDecalProxies.Reset();
 }
 
 // 등록된 라이트를 셰이더용 상수로 모아 Renderer에 올린다. 컴포넌트 값을 매 프레임 직접 읽으므로 별도 갱신 경로가 필요 없다.
@@ -374,6 +391,20 @@ void FScene::UpdateFogInfo(uint32 Id, const FFogInfo& FogInfo)
 
 void FScene::UpdateAllTransforms()
 {
+	for (FDecalSceneProxy* Proxy : RenderStateDirtyDecalProxies)
+	{
+		Proxy->UpdateRenderState();
+		Proxy->bRenderStateQueued = false;
+	}
+	RenderStateDirtyDecalProxies.Reset();
+
+	for (FDecalSceneProxy* Proxy : DirtyDecalProxies)
+	{
+		Proxy->UpdateTransform();
+		Proxy->bQueuedForUpdate = false;
+	}
+	DirtyDecalProxies.Reset();
+
 	for (FPrimitiveSceneProxy* Proxy : RenderStateDirtyProxies)
 	{
 		Proxy->UpdateRenderState();
@@ -448,4 +479,18 @@ void FScene::MarkRenderStateDirty(FPrimitiveSceneProxy* Proxy)
 	if (!Proxy || Proxy->bRenderStateQueued) return;
 	Proxy->bRenderStateQueued = true;
 	RenderStateDirtyProxies.Add(Proxy);
+}
+
+void FScene::MarkDecalDirty(FDecalSceneProxy* Proxy)
+{
+	if (!Proxy || Proxy->bQueuedForUpdate) return;
+	Proxy->bQueuedForUpdate = true;
+	DirtyDecalProxies.Add(Proxy);
+}
+
+void FScene::MarkDecalRenderStateDirty(FDecalSceneProxy* Proxy)
+{
+	if (!Proxy || Proxy->bRenderStateQueued) return;
+	Proxy->bRenderStateQueued = true;
+	RenderStateDirtyDecalProxies.Add(Proxy);
 }
