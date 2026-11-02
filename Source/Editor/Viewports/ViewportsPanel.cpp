@@ -12,6 +12,7 @@
 
 #include "Core/Stats/EditorStats.h"
 #include "Core/Stats/ShadowStats.h"
+#include "Core/Stats/DecalStats.h"
 #include "Render/ShadowSettings.h"
 
 namespace
@@ -419,6 +420,18 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 			FStatOverlay::GetObjectAllocationCount()), ValueColor});
 		Lines.Add({std::format("  Process {:.2f} MB",
 			static_cast<double>(FStatOverlay::GetProcessWorkingSetBytes()) / BytesPerMegabyte), ValueColor});
+	}
+
+	// Draw 수는 모든 View의 합이고 Fade로 건너뛴 Decal은 포함하지 않는다.
+	if (FStatOverlay::IsEnabled(EStatFlags::Decal))
+	{
+		Lines.Add({ "Decal", TitleColor });
+		Lines.Add({ std::format("  CPU Pass: {:.3f} ms",
+			FStatRegistry::GetCurrentFrameMs(DecalStats::STAT_RenderCPU)), ValueColor });
+		Lines.Add({ std::format("  Total: {}  Draws: {}  Additive: {}",
+			FStatRegistry::GetCounter(DecalStats::STAT_Total),
+			FStatRegistry::GetCounter(DecalStats::STAT_DrawCalls),
+			FStatRegistry::GetCounter(DecalStats::STAT_AdditiveDrawCalls)), ValueColor });
 	}
 
 	// 현재 프레임 전체 World의 그림자 통계를 기존 줄 목록에 추가한다.

@@ -39,7 +39,8 @@ float4 mainPS(float4 SvPosition : SV_POSITION) : SV_Target
     float3 WorldPosToDecal = mul(WorldPos, WorldToDecal).xyz;
     clip(1.0f - abs(WorldPosToDecal));
     
-    float2 DecalUV = WorldPosToDecal.zy * 0.5f + 0.5f;
+    // +X로 투영할 때 이미지 오른쪽이 +Y, 위쪽이 +Z가 되게 맞춘다. V는 아래가 +라서 Z를 뒤집는다.
+    float2 DecalUV = float2(WorldPosToDecal.y, -WorldPosToDecal.z) * 0.5f + 0.5f;
     float4 Tex = DecalTexture.Sample(DecalSampler, DecalUV);
 
     float3 Color = SRGBToLinear(Tex.rgb) * SRGBToLinear(DecalColor.rgb);

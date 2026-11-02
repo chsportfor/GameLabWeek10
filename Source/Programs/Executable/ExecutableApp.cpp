@@ -241,7 +241,8 @@ void UExecutableEngine::RenderScene(const FMinimalViewInfo& Camera, const FViewC
 		ViewConstants.ViewProjection,
 		ViewConstants.CameraWorldPos,
 		Camera.GetProjectionMatrix(),
-		mRenderingInfo.ViewportSetting);
+		mRenderingInfo.ViewportSetting,
+		true);
 	RenderCommand::SetRasterizerState(ERasterizerState::SolidBack);
 
 	FRenderingInfo ResumeInfo{ mRenderingInfo };

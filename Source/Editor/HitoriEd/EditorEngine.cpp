@@ -976,7 +976,8 @@ void UEditorEngine::RenderOpaquePass(int32 ViewIndex, const FRenderingInfo& View
 				ViewProjection,
 				ViewConstants.CameraWorldPos,
 				MultipleViewportsAdapter.GetEngineProjection(ViewIndex),
-				ViewRenderingInfo.ViewportSetting);
+				ViewRenderingInfo.ViewportSetting,
+				SettingsPanel->GetSettings().ShowFlags.IsEnabled(EEngineShowFlag::Decals));
 
 			RenderCommand::SetRasterizerState(SceneRasterizerState);
 

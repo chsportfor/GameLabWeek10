@@ -5,6 +5,7 @@
 #include "RenderResourceManager.h"
 #include "Renderer.h"
 #include "Asset/AssetManager.h"
+#include "Core/Stats/DecalStats.h"
 
 
 bool FDecalRenderer::Init(FRenderer* InRenderer)
@@ -98,6 +99,7 @@ void FDecalRenderer::DrawDecals(
 		RenderCommand::UpdateBufferData(ConstantBuffer.get(), &DecalConstants);
 		RenderCommand::BindConstantBuffer(0, ConstantBuffer.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 		RenderCommand::DrawIndexed(36);
+		FStatRegistry::AddCounter(bAdditive ? DecalStats::STAT_AdditiveDrawCalls : DecalStats::STAT_DrawCalls);
 	}
 }
 
@@ -108,8 +110,12 @@ void FDecalRenderer::OnRender(
 	const FMatrix& ViewProjection,
 	const FVector& CameraPosition,
 	const FMatrix& Projection,
-	const FViewportSettings& Viewport)
+	const FViewportSettings& Viewport,
+	bool bShowDecals)
 {
+	SCOPE_CYCLE_COUNTER(DecalStats::STAT_RenderCPU);
+	FStatRegistry::SetCounter(DecalStats::STAT_Total, Decals.Num());
+
 	if (!Renderer->EnsureDBuffer(Viewport.Width, Viewport.Height) || !Renderer->EnsureAdditiveBuffer(Viewport.Width, Viewport.Height))
 	{
 		return;
@@ -150,15 +156,22 @@ void FDecalRenderer::OnRender(
 	UStaticMesh* Cube = UAssetManager::GetAssetByPath<UStaticMesh>("Cube");
 	RenderCommand::BindMesh(Cube);
 
+	// Show Flag가 꺼져도 패스는 실행해 버퍼를 비운다. 건너뛰면 UberLit이 지난 값을 읽는다.
 	RenderCommand::BeginRenderPass(DecalPass);
 	RenderCommand::BindPipelineState(PipelineState);
-	DrawDecals(SortDecals, DecalConstants, ViewProjection, CameraPosition, Projection, Viewport.Width, false);
+	if (bShowDecals)
+	{
+		DrawDecals(SortDecals, DecalConstants, ViewProjection, CameraPosition, Projection, Viewport.Width, false);
+	}
 	RenderCommand::EndRenderPass(DecalPass);
 
 	// Additive Decal이 없어도 지난 프레임 값이 남지 않게 패스는 항상 실행해 비운다.
 	RenderCommand::BeginRenderPass(AdditivePass);
 	RenderCommand::BindPipelineState(AdditivePipelineState);
-	DrawDecals(SortDecals, DecalConstants, ViewProjection, CameraPosition, Projection, Viewport.Width, true);
+	if (bShowDecals)
+	{
+		DrawDecals(SortDecals, DecalConstants, ViewProjection, CameraPosition, Projection, Viewport.Width, true);
+	}
 	RenderCommand::EndRenderPass(AdditivePass);
 
 	RenderCommand::UnbindShaderResource(0, EShaderBindFlagBits::Pixel);

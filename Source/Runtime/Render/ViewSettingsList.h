@@ -21,4 +21,5 @@
     /* 1u << 6, 1u << 7: 예전 Grid·PSGrid 토글. 그리드는 투영에 따라 방식이 고정되어 항상 그린다. */ \
     X(Wireframe,     1u << 8, "Wireframe",              false, View,   Viewport)  \
     X(DynamicShadows, 1u << 9, "Dynamic Shadows",        true,  Global, Rendering) \
-    X(ShadowCascades, 1u << 10, "Shadow Cascades", false, View,   Viewport)
+    X(ShadowCascades, 1u << 10, "Shadow Cascades", false, View,   Viewport)  \
+    X(Decals,         1u << 11, "Decals",          true,  Global, Rendering)

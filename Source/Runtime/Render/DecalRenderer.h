@@ -40,7 +40,8 @@ public:
 		const FMatrix& ViewProjection,
 		const FVector& CameraPosition,
 		const FMatrix& Projection,
-		const FViewportSettings& Viewport
+		const FViewportSettings& Viewport,
+		bool bShowDecals
 	);
 
 private:
