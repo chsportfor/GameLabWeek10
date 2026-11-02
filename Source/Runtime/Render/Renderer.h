@@ -295,6 +295,9 @@ public:
 	bool EnsureDBuffer(uint32 InDBufferWidth, uint32 InDBufferHeight);
 	FTexture2D* GetDBuffer() const;
 	
+	bool EnsureAdditiveBuffer(uint32 InAdditiveBufferWidth, uint32 InAdditiveBufferHeight);
+	FTexture2D* GetAdditiveBuffer() const;
+
 
 	// Details Preview에서 선택한 투영의 이번 프레임 캐시 상태를 확인한다.
 	struct FShadowCacheDebugInfo
@@ -373,6 +376,7 @@ private:
 
 	// 데칼용 버퍼
 	TUniquePtr<FTexture2D> DBuffer;
+	TUniquePtr<FTexture2D> AdditiveBuffer;
 
 	// 필요한 항목 수가 기존 용량을 초과했을 때 GPU 버퍼를 교체한다.
 	bool EnsureShadowParameterCapacity(uint32 RequiredCount);

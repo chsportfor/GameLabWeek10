@@ -109,15 +109,13 @@ AActor* UWorld::SpawnActor(UClass* Class, FName InName, const FTransform* Transf
 	NewActor->World = this;
 	NewActor->Level = PersistentLevel;
 
-	// 3. Transform 적용
-	const FTransform SpawnTransform = Transform ? *Transform : FTransform::Identity;
-
+	// 3. Transform 적용. 호출자가 지정하지 않으면 생성자가 정한 Root Transform을 유지한다.
 	if (!NewActor->GetRootComponent())
 		NewActor->CreateDefaultSceneRoot();
 
-	if (NewActor->GetRootComponent())
+	if (Transform && NewActor->GetRootComponent())
 	{
-		NewActor->GetRootComponent()->SetTransform(SpawnTransform);
+		NewActor->GetRootComponent()->SetTransform(*Transform);
 	}
 
 	NewActor->RegisterAllComponents();

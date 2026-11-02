@@ -19,8 +19,7 @@ UDecalComponent* ADecalActor::GetDecalComponent() const
 ADecalActor::ADecalActor()
 {
     DecalComponent = CreateDefaultSubobject<UDecalComponent>("UDecalComponent");
-    SetupDecalRoot(DecalComponent, ResourcePaths::DecalIcon);
-    DecalComponent->SetRelativeRotation(FRotator(45.0f, 0.0f, 0.0f));
+    SetupDecalRoot(DecalComponent, ResourcePaths::DecalIcon);   
 
     // Icon 옆에 붙어서 Decal의 방향을 알려주는 기즈모 arrow (로컬 x축)
     ArrowComponent = CreateDefaultSubobject<UStaticMeshComponent>("UArrowComponent");

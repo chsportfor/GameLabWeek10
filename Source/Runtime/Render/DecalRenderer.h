@@ -44,7 +44,19 @@ public:
 	);
 
 private:
+	// bAdditive와 값이 같은 Decal만 현재 렌더 타깃에 그린다.
+	void DrawDecals(
+		const TArray<FDecalSceneProxy*>& SortDecals,
+		FDecalConstants& DecalConstants,
+		const FMatrix& ViewProjection,
+		const FVector& CameraPosition,
+		const FMatrix& Projection,
+		int32 ViewWidth,
+		bool bAdditive
+	);
+
 	FShaderProgram* Shader = nullptr;
 	FPipelineState PipelineState;
+	FPipelineState AdditivePipelineState;
 	TUniquePtr<FConstantBuffer> ConstantBuffer;
 };

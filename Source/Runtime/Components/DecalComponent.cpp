@@ -88,6 +88,12 @@ void UDecalComponent::SetAdditive(bool bInAdditive)
 	MarkRenderStateDirty();
 }
 
+void UDecalComponent::SetFadeScreenSize(float InFadeScreenSize)
+{
+	FadeScreenSize = InFadeScreenSize;
+	MarkRenderStateDirty();
+}
+
 const FLinearColor& UDecalComponent::GetDecalColor() const
 {
 	return (DecalColor);

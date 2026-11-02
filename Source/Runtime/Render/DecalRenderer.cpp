@@ -26,6 +26,9 @@ bool FDecalRenderer::Init(FRenderer* InRenderer)
 	PipelineState.DepthStencilState = EDepthStencilState::Disabled;
 	PipelineState.RasterizerState = ERasterizerState::SolidFront;
 
+	AdditivePipelineState = PipelineState;
+	AdditivePipelineState.BlendState = EBlendState::Additive;
+
 	return true;
 }
 
@@ -47,6 +50,7 @@ float FDecalRenderer::CalculateScreenFadeAlpha(
 	const FVector DecalOrigin = DecalToWorld.TransformPosition(FVector::ZeroVector);
 	const float Distance = FVector::Distance(CameraPosition, DecalOrigin);
 
+	// 박스 중심부터 각 면까지의 거리
 	const float ScaleX = FVector(DecalToWorld.M[0][0], DecalToWorld.M[0][1], DecalToWorld.M[0][2]).Size();
 	const float ScaleY = FVector(DecalToWorld.M[1][0], DecalToWorld.M[1][1], DecalToWorld.M[1][2]).Size();
 	const float ScaleZ = FVector(DecalToWorld.M[2][0], DecalToWorld.M[2][1], DecalToWorld.M[2][2]).Size();
@@ -55,10 +59,46 @@ float FDecalRenderer::CalculateScreenFadeAlpha(
 	const float CurrentScreenSize = Radius / Distance;
 
 	const float FOVFactor = ((2.0f / Projection.M[1][0]) / ViewWidth) * 600.0f;
-	const float FadeCoeff = FadeScreenSize * FOVFactor;
-	const float FadeRange = FadeCoeff * 0.5f;
+	const float FadeCoefficient = FadeScreenSize * FOVFactor;
+	const float FadeRange = FadeCoefficient * 0.5f;
 
-	return (std::clamp((CurrentScreenSize - FadeCoeff) / FadeRange, 0.0f, 1.0f));
+	return (std::clamp((CurrentScreenSize - FadeCoefficient) / FadeRange, 0.0f, 1.0f));
+}
+
+void FDecalRenderer::DrawDecals(
+	const TArray<FDecalSceneProxy*>& SortDecals,
+	FDecalConstants& DecalConstants,
+	const FMatrix& ViewProjection,
+	const FVector& CameraPosition,
+	const FMatrix& Projection,
+	int32 ViewWidth,
+	bool bAdditive)
+{
+	for (FDecalSceneProxy* DecalSceneProxy : SortDecals)
+	{
+		if (DecalSceneProxy->IsAdditive() != bAdditive)
+		{
+			continue;
+		}
+
+		const float ScreenAlpha = CalculateScreenFadeAlpha(DecalSceneProxy, CameraPosition, Projection, ViewWidth);
+		if (DecalSceneProxy->GetFadeAlpha() * ScreenAlpha <= 0.0f)
+		{
+			continue;
+		}
+
+
+		DecalConstants.DecalToClip = DecalSceneProxy->GetDecalToWorld() * ViewProjection;
+		DecalConstants.DecalInfo.WorldToDecal = DecalSceneProxy->GetWorldToDecal();
+		DecalConstants.DecalInfo.DecalColor = DecalSceneProxy->GetDecalColor();
+		DecalConstants.DecalInfo.DecalColor.A *= DecalSceneProxy->GetFadeAlpha() * ScreenAlpha;
+
+
+		RenderCommand::BindShaderResource(1, DecalSceneProxy->GetDecalTexture(), EShaderBindFlagBits::Pixel);
+		RenderCommand::UpdateBufferData(ConstantBuffer.get(), &DecalConstants);
+		RenderCommand::BindConstantBuffer(0, ConstantBuffer.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+		RenderCommand::DrawIndexed(36);
+	}
 }
 
 void FDecalRenderer::OnRender(
@@ -70,7 +110,7 @@ void FDecalRenderer::OnRender(
 	const FMatrix& Projection,
 	const FViewportSettings& Viewport)
 {
-	if (!Renderer->EnsureDBuffer(Viewport.Width, Viewport.Height))
+	if (!Renderer->EnsureDBuffer(Viewport.Width, Viewport.Height) || !Renderer->EnsureAdditiveBuffer(Viewport.Width, Viewport.Height))
 	{
 		return;
 	}
@@ -81,7 +121,9 @@ void FDecalRenderer::OnRender(
 	ColorDesc.Texture = Renderer->GetDBuffer();
 	ColorDesc.ClearValue.ColorClearValue = FVector4(0, 0, 0, 0);
 	DecalPass.ColorRenderTargets.Add(ColorDesc);
-	RenderCommand::BeginRenderPass(DecalPass);
+
+	FRenderingInfo AdditivePass = DecalPass;
+	AdditivePass.ColorRenderTargets[0].Texture = Renderer->GetAdditiveBuffer();
 
 	//정렬 순서 SortOrder → 텍스처 포인터 → 프록시 주소
 
@@ -103,33 +145,22 @@ void FDecalRenderer::OnRender(
 	DecalConstants.InverseViewProjection = ViewProjection.Inverse();    // 루프 밖에서 한 번만 계산
 	DecalConstants.DecalInfo.ViewSize = FVector2(static_cast<float>(Viewport.Width), static_cast<float>(Viewport.Height));
 
-	RenderCommand::BindPipelineState(PipelineState);
 	RenderCommand::BindSamplerState(0, ESamplerState::LinearClamp, EShaderBindFlagBits::Pixel);
 	RenderCommand::BindShaderResource(0, DepthTexture, EShaderBindFlagBits::Pixel);
 	UStaticMesh* Cube = UAssetManager::GetAssetByPath<UStaticMesh>("Cube");
 	RenderCommand::BindMesh(Cube);
 
-	for (FDecalSceneProxy* DecalSceneProxy : SortDecals)
-	{
-		const float ScreenAlpha = CalculateScreenFadeAlpha(DecalSceneProxy, CameraPosition, Projection, Viewport.Width);
-		if (DecalSceneProxy->GetFadeAlpha() * ScreenAlpha <= 0.0f)
-		{
-			continue;
-		}
+	RenderCommand::BeginRenderPass(DecalPass);
+	RenderCommand::BindPipelineState(PipelineState);
+	DrawDecals(SortDecals, DecalConstants, ViewProjection, CameraPosition, Projection, Viewport.Width, false);
+	RenderCommand::EndRenderPass(DecalPass);
 
+	// Additive Decal이 없어도 지난 프레임 값이 남지 않게 패스는 항상 실행해 비운다.
+	RenderCommand::BeginRenderPass(AdditivePass);
+	RenderCommand::BindPipelineState(AdditivePipelineState);
+	DrawDecals(SortDecals, DecalConstants, ViewProjection, CameraPosition, Projection, Viewport.Width, true);
+	RenderCommand::EndRenderPass(AdditivePass);
 
-		DecalConstants.DecalToClip = DecalSceneProxy->GetDecalToWorld() * ViewProjection;
-		DecalConstants.DecalInfo.WorldToDecal = DecalSceneProxy->GetWorldToDecal();
-		DecalConstants.DecalInfo.DecalColor = DecalSceneProxy->GetDecalColor();
-		DecalConstants.DecalInfo.DecalColor.A *= DecalSceneProxy->GetFadeAlpha() * ScreenAlpha;
-
-
-		RenderCommand::BindShaderResource(1, DecalSceneProxy->GetDecalTexture(), EShaderBindFlagBits::Pixel);
-		RenderCommand::UpdateBufferData(ConstantBuffer.get(), &DecalConstants);
-		RenderCommand::BindConstantBuffer(0, ConstantBuffer.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-		RenderCommand::DrawIndexed(36);
-	}
 	RenderCommand::UnbindShaderResource(0, EShaderBindFlagBits::Pixel);
 	RenderCommand::UnbindShaderResource(1, EShaderBindFlagBits::Pixel);
-	RenderCommand::EndRenderPass(DecalPass);
 }

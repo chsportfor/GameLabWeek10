@@ -16,9 +16,6 @@ public:
 	UBillboardComponent* GetBillboardComponent() const;
 	UDecalComponent* GetDecalComponent() const;
 
-protected:
-
-
 private:
 	void SetupDecalRoot(UDecalComponent* InDecalComponent, const FString& IconPath);
 

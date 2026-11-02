@@ -143,6 +143,7 @@ Texture2D DiffuseTexture : register(t0);
 Texture2D NormalTexture : register(t1);
 #if !defined(EDITOR_ARROW_SHADER)
 Texture2D DBuffer : register(t8);
+Texture2D AdditiveBuffer : register(t9);
 #endif
 SamplerState MaterialSampler : register(s0);
 SamplerComparisonState PCFSampler : register(s1);
@@ -937,6 +938,12 @@ float4 mainPS(VS_OUTPUT Input) : SV_TARGET
 
     // 먼저 기존 조명과 그림자를 모두 반영한 표면 색을 계산한다.
     float3 FinalColor = Albedo.rgb * DiffuseLighting + SpecularLighting;
+#if !defined(EDITOR_ARROW_SHADER)
+    if (Input.ReceivesDecal && bOpaque > 0.5f)
+    {
+        FinalColor += Albedo.rgb * AdditiveBuffer.Load(int3(Input.SvPosition.xy, 0)).rgb;
+    }
+#endif
 
 #if defined(LIGHTING_MODEL_LAMBERT) || defined(LIGHTING_MODEL_BLINN_PHONG)
     if (VisualizeShadowCascades != 0 && Input.ReceivesShadow != 0)

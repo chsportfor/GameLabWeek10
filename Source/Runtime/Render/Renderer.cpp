@@ -436,6 +436,42 @@ FTexture2D* FRenderer::GetDBuffer() const
 	return (DBuffer.get());
 }
 
+bool FRenderer::EnsureAdditiveBuffer(uint32 InAdditiveBufferWidth, uint32 InAdditiveBufferHeight)
+{
+	if (InAdditiveBufferWidth == 0 || InAdditiveBufferHeight == 0)
+	{
+		return (false);
+	}
+	if (!AdditiveBuffer || AdditiveBuffer->GetWidth() < InAdditiveBufferWidth || AdditiveBuffer->GetHeight() < InAdditiveBufferHeight)
+	{
+
+		D3D11_TEXTURE2D_DESC Desc{};
+		Desc.Width = AdditiveBuffer ? std::max(InAdditiveBufferWidth, AdditiveBuffer->GetWidth()) : InAdditiveBufferWidth;
+		Desc.Height = AdditiveBuffer ? std::max(InAdditiveBufferHeight, AdditiveBuffer->GetHeight()) : InAdditiveBufferHeight;
+		Desc.MipLevels = 1;
+		Desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+		Desc.SampleDesc.Count = 1;
+		Desc.Usage = D3D11_USAGE_DEFAULT;
+		Desc.ArraySize = 1;
+		Desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+		AdditiveBuffer = RenderCommand::CreateTexture2D(Desc);
+
+		return (AdditiveBuffer && AdditiveBuffer->GetRTV() != nullptr);
+	}
+	else
+	{
+		return (true);
+	}
+}
+
+FTexture2D* FRenderer::GetAdditiveBuffer() const
+{
+	return (AdditiveBuffer.get());
+}
+
+
+
 // 카메라의 ViewProjection을 공통 렌더 경로로 전달한다.
 void FRenderer::RenderAll(FRenderQueue& InQueue, UCameraComponent* CameraComponent)
 {
@@ -461,9 +497,12 @@ void FRenderer::RenderOpaque(const FMatrix& ViewProjection)
 
 	if (DBuffer)
 		RenderCommand::BindShaderResource(8, DBuffer.get(), EShaderBindFlagBits::Pixel);
+	if (AdditiveBuffer)
+		RenderCommand::BindShaderResource(9, AdditiveBuffer.get(), EShaderBindFlagBits::Pixel);
 	DrawStaticGroups();
 	DrawPackets(0, FirstTranslucentIndex, ViewProjection);
 	RenderCommand::UnbindShaderResource(8, EShaderBindFlagBits::Pixel);
+	RenderCommand::UnbindShaderResource(9, EShaderBindFlagBits::Pixel);
 }
 
 // RenderOpaque가 남긴 반투명 패킷을 먼 것부터 그린다.

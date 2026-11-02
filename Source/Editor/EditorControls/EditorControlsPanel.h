@@ -18,6 +18,7 @@
 #include "GameFramework/Actor/SphereActor.h"
 #include "GameFramework/Actor/CapsuleActor.h"
 #include "GameFramework/Actor/DecalActor.h"
+#include "GameFramework/Actor/FakeSpotLightActor.h"
 #include "Sequence/SequenceActor.h"
 
 class FMultipleViewportsAdapter;
@@ -41,7 +42,7 @@ public:
 
 	int32 SelectedIndex = 0;
 
-	const char* Items[16] ={
+	const char* Items[17] ={
 		"Actor",
 		"Box",
 		"Capsule",
@@ -57,7 +58,8 @@ public:
 		"SpotLight",
 		"StaticMesh",
 		"Text",
-		"Decal",};
+		"Decal",
+		"FakeSpotLight",};
 
 	FGizmo* Gizmo = nullptr;
 	int32 GizmoSelectedIndex = 0;
@@ -83,7 +85,8 @@ public:
 		ASpotLightActor::StaticClass(),
 		AStaticMeshActor::StaticClass(),
 		ATextRenderActor::StaticClass(),
-		ADecalActor::StaticClass()
+		ADecalActor::StaticClass(),
+		AFakeSpotLightActor::StaticClass()
 	};
 
     void SetViewportAdapter(FMultipleViewportsAdapter* InAdapter) { ViewportAdapter = InAdapter; }

@@ -45,6 +45,7 @@ public:
     void SetSortOrder(int32 InSortOrder);
     void SetDecalSize(const FVector& InDecalSize);
     void SetAdditive(bool bInAdditive);
+    void SetFadeScreenSize(float InFadeScreenSize);
 
     const FLinearColor& GetDecalColor() const;
     int32 GetSortOrder() const;
