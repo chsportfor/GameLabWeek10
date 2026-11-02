@@ -6,6 +6,51 @@
 
 UDecalComponent::UDecalComponent()
 {
+	PrimaryComponentTick.bCanEverTick = true;
+}
+
+void UDecalComponent::BeginPlay()
+{
+	Super::BeginPlay();
+	FadeElapsedTime = 0.0f;
+	bFadeFinished = false;
+}
+
+void UDecalComponent::TickComponent(float DeltaTime)
+{
+	if (bFadeFinished)
+	{
+		return;
+	}
+
+	float PreviousFadeAlpha = GetFadeAlpha();
+	FadeElapsedTime += DeltaTime;
+
+	const float LifeSpan = FadeStartDelay + FadeDuration;
+	if (LifeSpan > 0.0f && FadeElapsedTime >= LifeSpan)
+	{
+		bFadeFinished = true;
+
+		if (bDestroyOwnerAfterFade)
+		{
+			GetOwner()->Destroy();
+		}
+		else if (GetOwner()->GetRootComponent() != this)
+		{
+			GetWorld()->RequestDestroyComponent(this);
+		}
+		else
+		{
+			MarkRenderStateDirty();
+		}
+	}
+	else
+	{
+		if (PreviousFadeAlpha != GetFadeAlpha())
+		{
+			MarkRenderStateDirty();
+		}
+	}
 }
 
 UTexture2D* UDecalComponent::GetDecalTexture() const
@@ -51,6 +96,39 @@ const FLinearColor& UDecalComponent::GetDecalColor() const
 int32 UDecalComponent::GetSortOrder() const
 {
 	return (SortOrder);
+}
+
+float	UDecalComponent::GetFadeAlpha() const
+{
+	float FadeIn = 1.0f;
+	float FadeOut = 1.0f;
+
+	if (GetWorld() && GetWorld()->GetWorldType() == EWorldType::Editor)
+	{
+		return (1.0f);
+	}
+
+	if (bFadeFinished)
+	{
+		return (0.0f);
+	}
+
+	if (FadeInDuration > 0.0f)
+	{
+		FadeIn = std::clamp((FadeElapsedTime - FadeInStartDelay) / FadeInDuration, 0.0f, 1.0f);
+	}
+
+	if (FadeDuration > 0.0f)
+	{
+		FadeOut = std::clamp(1.0f - (FadeElapsedTime - FadeStartDelay) / FadeDuration, 0.0f, 1.0f);
+	}
+
+	return (std::min(FadeIn, FadeOut));
+}
+
+float	UDecalComponent::GetFadeScreenSize() const
+{
+	return (FadeScreenSize);
 }
 
 bool UDecalComponent::IsAdditive() const
@@ -135,7 +213,8 @@ void UDecalComponent::PostEditChangeProperty(const FProperty& Property)
 		OnTransformDirty();
 	}
 	else if (Property.Name == "DecalTexture" || Property.Name == "DecalColor"
-		|| Property.Name == "SortOrder" || Property.Name == "bAdditive")
+		|| Property.Name == "SortOrder" || Property.Name == "bAdditive" 
+		|| Property.Name == "FadeScreenSize")
 	{
 		MarkRenderStateDirty();
 	}

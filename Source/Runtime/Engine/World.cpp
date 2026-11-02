@@ -165,6 +165,7 @@ void UWorld::Tick(float DeltaTime) {
 		GatherOverlap(); // 게임 중에만 충돌처리
 		bInGameTick = false;
 
+		FlushPendingDestroyComponents();
 		FlushPendingDestroyActors();
 
 		if (WorldType == EWorldType::PIE || WorldType == EWorldType::Game) {
@@ -216,6 +217,7 @@ void UWorld::ClearWorld() {
 	{
 		BeginPlayList.Dequeue();
 	}
+	PendingDestroyComponents.Reset();
 	PendingDestroyActors.Reset();
 
 
@@ -1012,6 +1014,29 @@ void UWorld::FlushPendingDestroyActors()
 		DestroyActorNow(Actor);
 }
 
+void UWorld::RequestDestroyComponent(UActorComponent* Component)
+{
+	if (!Component || !Component->GetOwner())
+		return;
+
+	if (bInGameTick)
+	{
+		PendingDestroyComponents.Add(Component);
+		return;
+	}
+
+	Component->GetOwner()->DestroyComponent(Component);
+}
+
+void UWorld::FlushPendingDestroyComponents()
+{ 
+	const TArray<UActorComponent*> Components = PendingDestroyComponents;
+	PendingDestroyComponents.Reset();
+
+	for (UActorComponent* ActorComponent : Components)
+		ActorComponent->GetOwner()->DestroyComponent(ActorComponent);
+}
+
 bool UWorld::DestroyActorNow(AActor* Actor) {
 	ULevel* Level{ Actor->GetLevel() };
 	if (Actor == mPlayerCameraManager) {
@@ -1041,6 +1066,13 @@ bool UWorld::DestroyActorNow(AActor* Actor) {
 	}
 
 	BeginPlayList = std::move(NewBeginPlayList);
+
+	// 액터가 바로 지워지면 대기 중이던 소유 컴포넌트 포인터가 남으므로 함께 뺀다.
+	for (int32 Index = PendingDestroyComponents.Num() - 1; Index >= 0; --Index)
+	{
+		if (PendingDestroyComponents[Index]->GetOwner() == Actor)
+			PendingDestroyComponents.RemoveAtSwap(Index);
+	}
 
 	// 4. Level의 Actors에서 제거
 	for (int32 i = Level->Actors.Num() - 1; i >= 0; --i)

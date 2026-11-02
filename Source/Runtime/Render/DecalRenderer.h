@@ -26,12 +26,22 @@ public:
 
 	bool Init(FRenderer* InRenderer);
 
+	float CalculateScreenFadeAlpha(
+		const FDecalSceneProxy* Proxy,
+		const FVector& CameraPosition,
+		const FMatrix& Projection,
+		int32 ViewWidth
+	);
+
 	void OnRender(
 		FRenderer* Renderer,
 		const TArray<FDecalSceneProxy*>& Decals,
 		FTexture2D* DepthTexture,
 		const FMatrix& ViewProjection,
-		const FViewportSettings& Viewport);
+		const FVector& CameraPosition,
+		const FMatrix& Projection,
+		const FViewportSettings& Viewport
+	);
 
 private:
 	FShaderProgram* Shader = nullptr;

@@ -18,4 +18,6 @@ void FDecalSceneProxy::UpdateRenderState()
 	DecalColor = Component->GetDecalColor();
 	SortOrder = Component->GetSortOrder();
 	bAdditive = Component->IsAdditive();
+	FadeAlpha = Component->GetFadeAlpha();
+	FadeScreenSize = Component->GetFadeScreenSize();
 }

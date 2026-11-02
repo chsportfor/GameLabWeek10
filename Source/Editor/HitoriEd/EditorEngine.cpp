@@ -974,6 +974,8 @@ void UEditorEngine::RenderOpaquePass(int32 ViewIndex, const FRenderingInfo& View
 				ViewWorld.GetScene().DecalSceneProxies,
 				DepthTexture,
 				ViewProjection,
+				ViewConstants.CameraWorldPos,
+				MultipleViewportsAdapter.GetEngineProjection(ViewIndex),
 				ViewRenderingInfo.ViewportSetting);
 
 			RenderCommand::SetRasterizerState(SceneRasterizerState);

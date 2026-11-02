@@ -25,6 +25,11 @@ class UDecalComponent : public USceneComponent
 
 public:
     UDecalComponent();
+
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime) override;
+
+
     bool ShouldCreateRenderState() const override;
     void CreateRenderState() override;
     void DestroyRenderState() override;
@@ -43,6 +48,8 @@ public:
 
     const FLinearColor& GetDecalColor() const;
     int32 GetSortOrder() const;
+    float GetFadeAlpha() const;
+    float GetFadeScreenSize() const;
     bool IsAdditive() const;
     
     FMatrix GetTransformIncludingDecalSize() const;   // 프록시와 셰이더에서 사용
@@ -65,8 +72,10 @@ private:
     float   FadeDuration = 0.0f;
     float   FadeInDuration = 0.0f;
     float   FadeInStartDelay = 0.0f;
-    bool    bDestroyOwnerAfterFade = true;
-
     float   FadeElapsedTime = 0.0f;
+    bool    bDestroyOwnerAfterFade = true;
+    bool    bFadeFinished = false;
+
+    
 
 };

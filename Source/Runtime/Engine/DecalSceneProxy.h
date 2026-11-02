@@ -22,21 +22,28 @@ public:
 	UTexture2D* GetDecalTexture() const { return DecalTexture; }
 	const FLinearColor& GetDecalColor() const { return DecalColor; }
 	int32 GetSortOrder() const { return SortOrder; }
+	float GetFadeAlpha() const { return FadeAlpha; }
+	float GetFadeScreenSize() const { return FadeScreenSize; }
 	bool IsAdditive() const { return bAdditive; }
 
 private:
 	friend class FScene;
 
-	FScene* Scene = nullptr;
-	const UDecalComponent* Component = nullptr;
+
+	int32	SortOrder = 0;
+	int32	PackedIndex = INDEX_NONE;
+	float	FadeAlpha = 1.0f;
+	float   FadeScreenSize = 0.01f; // 화면 비율
+	bool	bAdditive = false;
+	bool	bQueuedForUpdate = false;
+	bool	bRenderStateQueued = false;
 	FMatrix DecalToWorld;
 	FMatrix WorldToDecal;
-	FAABB Bounds;
-	UTexture2D* DecalTexture = nullptr;
-	FLinearColor DecalColor = FLinearColor(1, 1, 1, 1);
-	int32 SortOrder = 0;
-	int32 PackedIndex = INDEX_NONE;
-	bool bAdditive = false;
-	bool bQueuedForUpdate = false;
-	bool bRenderStateQueued = false;
+	FAABB	Bounds;
+	FScene* Scene = nullptr;
+	UTexture2D*		DecalTexture = nullptr;
+	FLinearColor	DecalColor = FLinearColor(1, 1, 1, 1);
+	const UDecalComponent* Component = nullptr;
+	
+	
 };

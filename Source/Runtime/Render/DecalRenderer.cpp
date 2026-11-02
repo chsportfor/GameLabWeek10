@@ -29,11 +29,45 @@ bool FDecalRenderer::Init(FRenderer* InRenderer)
 	return true;
 }
 
+float FDecalRenderer::CalculateScreenFadeAlpha(
+	const FDecalSceneProxy* Proxy,
+	const FVector& CameraPosition,
+	const FMatrix& Projection,
+	int32 ViewWidth)
+{
+	const float FadeScreenSize = Proxy->GetFadeScreenSize();
+	const bool bOrthographic = Projection.M[3][3] != 0.0f;
+	if (FadeScreenSize == 0.0f || bOrthographic)
+	{
+		return (1.0f);
+	}
+
+	const FMatrix& DecalToWorld = Proxy->GetDecalToWorld();
+
+	const FVector DecalOrigin = DecalToWorld.TransformPosition(FVector::ZeroVector);
+	const float Distance = FVector::Distance(CameraPosition, DecalOrigin);
+
+	const float ScaleX = FVector(DecalToWorld.M[0][0], DecalToWorld.M[0][1], DecalToWorld.M[0][2]).Size();
+	const float ScaleY = FVector(DecalToWorld.M[1][0], DecalToWorld.M[1][1], DecalToWorld.M[1][2]).Size();
+	const float ScaleZ = FVector(DecalToWorld.M[2][0], DecalToWorld.M[2][1], DecalToWorld.M[2][2]).Size();
+	const float Radius = std::max({ ScaleX, ScaleY, ScaleZ });
+
+	const float CurrentScreenSize = Radius / Distance;
+
+	const float FOVFactor = ((2.0f / Projection.M[1][0]) / ViewWidth) * 600.0f;
+	const float FadeCoeff = FadeScreenSize * FOVFactor;
+	const float FadeRange = FadeCoeff * 0.5f;
+
+	return (std::clamp((CurrentScreenSize - FadeCoeff) / FadeRange, 0.0f, 1.0f));
+}
+
 void FDecalRenderer::OnRender(
 	FRenderer* Renderer,
 	const TArray<FDecalSceneProxy*>& Decals,
 	FTexture2D* DepthTexture,
 	const FMatrix& ViewProjection,
+	const FVector& CameraPosition,
+	const FMatrix& Projection,
 	const FViewportSettings& Viewport)
 {
 	if (!Renderer->EnsureDBuffer(Viewport.Width, Viewport.Height))
@@ -77,9 +111,18 @@ void FDecalRenderer::OnRender(
 
 	for (FDecalSceneProxy* DecalSceneProxy : SortDecals)
 	{
+		const float ScreenAlpha = CalculateScreenFadeAlpha(DecalSceneProxy, CameraPosition, Projection, Viewport.Width);
+		if (DecalSceneProxy->GetFadeAlpha() * ScreenAlpha <= 0.0f)
+		{
+			continue;
+		}
+
+
 		DecalConstants.DecalToClip = DecalSceneProxy->GetDecalToWorld() * ViewProjection;
 		DecalConstants.DecalInfo.WorldToDecal = DecalSceneProxy->GetWorldToDecal();
 		DecalConstants.DecalInfo.DecalColor = DecalSceneProxy->GetDecalColor();
+		DecalConstants.DecalInfo.DecalColor.A *= DecalSceneProxy->GetFadeAlpha() * ScreenAlpha;
+
 
 		RenderCommand::BindShaderResource(1, DecalSceneProxy->GetDecalTexture(), EShaderBindFlagBits::Pixel);
 		RenderCommand::UpdateBufferData(ConstantBuffer.get(), &DecalConstants);
