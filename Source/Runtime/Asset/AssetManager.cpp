@@ -10,6 +10,7 @@
 #include "Render/RenderResourceManager.h"
 
 #include "Asset/ObjImporter/ObjImporter.h"
+#include "Asset/FBXImporter/FbxImporter.h"
 
 #include "Render/GeometryGenerator.h"
 #include "UObject/UObjectGlobals.h"
@@ -117,6 +118,101 @@ namespace
 
 		return Mesh;
 	}
+
+	USkeletalMesh* CreateSkeletalMesh(const FSkeletalMeshData* MeshData)
+	{
+		if (!MeshData || MeshData->Meshes.IsEmpty()) return nullptr;
+
+		TArray<FVertex> RenderVertices;
+		TArray<uint32> RenderIndices;
+		TArray<FSkeletalMeshSection> RenderSections;
+
+		uint32 BaseMaterial = 0;
+
+		for (int i = 0; i < MeshData->Meshes.Num(); i++) // 전체 Mesh에 대하여 VertexBuffer,IndexBuffer 종합하여 추가
+		{
+			uint32 BaseVertex = static_cast<uint32>(RenderVertices.Num());
+			uint32 BaseIndex = RenderIndices.Num();
+
+			for (int j = 0; j < MeshData->Meshes[i].Vertices.Num(); j++)
+			{
+				RenderVertices.Add(MeshData->Meshes[i].Vertices[j].Vertex);
+			}
+
+			for (int j = 0; j < MeshData->Meshes[i].Indices.Num(); j++)
+			{
+				RenderIndices.Add(BaseVertex + MeshData->Meshes[i].Indices[j]); // Mesh마다 Index가 0으로 돌아가므로 겹치는것을 방지하기 위해 BaseVertex만큼 Offset 추가
+			}
+			for (int j = 0; j < MeshData->Meshes[i].Sections.Num(); j++)
+			{
+				FSkeletalMeshSection Section = MeshData->Meshes[i].Sections[j];
+				Section.StartIndex += BaseIndex;	// Mesh마다 Index 시작 겹치므로 Offset 추가
+				Section.MaterialSlotIndex += BaseMaterial;	// Mesh마다 Material의 Index 시작 겹치므로 Offset 추가
+				RenderSections.Add(Section);
+			}
+			BaseMaterial += static_cast<uint32>(MeshData->Meshes[i].MaterialSlots.Num());	// 한 Mesh의 MaterialSlot 추가가 끝날때마다 BaseMaterial에 전체 슬롯 개수만큼 더해줌 => 현재의 전체 Material 개수 표시
+		}
+
+		if (RenderVertices.IsEmpty() || RenderIndices.IsEmpty()) return nullptr;
+
+
+		TUniquePtr<FVertexBuffer> VB = RenderCommand::CreateStaticVertexBuffer(RenderVertices.GetData(), sizeof(FVertex) * static_cast<uint32>(RenderVertices.size()), sizeof(FVertex));
+		TUniquePtr<FIndexBuffer> IB = RenderCommand::CreateStaticIndexBuffer(RenderIndices.GetData(), static_cast<uint32>(RenderIndices.size()));
+		if (VB == nullptr || IB == nullptr) return nullptr;
+
+		USkeletalMesh* Mesh = NewObject<USkeletalMesh>();
+		Mesh->MeshData = *MeshData;
+
+		// Vertex/Index GPU 업로드
+		Mesh->VertexBuffer = std::move(VB);
+		Mesh->IndexBuffer = std::move(IB);
+		Mesh->Sections = std::move(RenderSections);	// Section 정보 저장
+
+		UMaterial* DefaultMaterial = UAssetManager::GetAssetByPath<UMaterial>("DefaultMaterial");
+		if (!DefaultMaterial)
+		{
+			return nullptr;
+		}
+
+		// MaterialSlots를 실제 UMaterial로 변환
+		for (int k = 0; k < Mesh->MeshData.Meshes.Num(); k++)
+		{
+			for (const FSkeletalMaterialSlot& Slot : Mesh->MeshData.Meshes[k].MaterialSlots)
+			{
+				UMaterial* Material = UMaterial::CreateInstance(DefaultMaterial);
+				if (!Material)
+				{
+					return nullptr;
+				}
+				Material->BaseColor = Slot.BaseColor;
+				Material->SetBlendState(Material->BaseColor.W < 1.0f ? EBlendState::AlphaBlend : EBlendState::Opaque);
+
+				if (!Slot.BaseColorTexturePath.empty())
+				{
+					UTexture2D* Texture = UAssetManager::Get().LoadTexture(Slot.BaseColorTexturePath);
+
+					if (Texture)
+					{
+						Material->Textures[0] = Texture;
+					}
+				}
+
+				if (!Slot.NormalTexturePath.empty())
+				{
+					if (UTexture2D * NormalTexture{ UAssetManager::Get().LoadTexture(Slot.NormalTexturePath) })
+					{
+						Material->Textures[1] = NormalTexture;
+					}
+				}
+
+				Mesh->Materials.Add(Material);
+			}
+		}
+		// 생성한 메시의 Bounds를 계산하고 등록된 Proxy에 변경을 알린다.
+		Mesh->RebuildRenderData();
+		return Mesh;
+	}
+
 
 	FString MakeAssetKey(const FString& Path)
 	{
@@ -421,6 +517,39 @@ UStaticMesh* UAssetManager::LoadObjStaticMesh(const FString& Path)
 	Get().RegisterAsset(Key, Mesh);
 	return Mesh;
 }
+
+USkeletalMesh* UAssetManager::LoadFbxSkeletonMesh(const FString& Path)
+{
+	const FString Key = MakeAssetKey(Path);
+	if (USkeletalMesh* Cached = GetAssetByPath<USkeletalMesh>(Key))
+	{
+		return Cached;
+	}
+
+	// Importer가 내부에서 FBX Scene을 생성하고, 엔진 데이터로 읽은 뒤 해제한다.
+	FFbxImporter Importer;
+	const FFbxImportResult ImportResult = Importer.ImportFBX(Path, Key);
+	if (!ImportResult.bSuccess)
+	{
+		HTR_LOG(Error, "[FBX] Skeletal mesh import failed: {}", Path);
+		return nullptr;
+	}
+
+	// Import 결과를 Cook한 뒤 GPU 버퍼와 실제 Material을 갖는 에셋을 만든다.
+	FSkeletalMeshData Data;
+	Importer.Cook(ImportResult, Data);
+	USkeletalMesh* Mesh = CreateSkeletalMesh(&Data);
+	if (!Mesh)
+	{
+		HTR_LOG(Error, "[FBX] Skeletal mesh resource creation failed: {}", Path);
+		return nullptr;
+	}
+
+	// 생성에 성공한 에셋만 등록하고, 다음 로드에서는 캐시를 반환한다.
+	Get().RegisterAsset(Key, Mesh);
+	return Mesh;
+}
+
 
 bool UAssetManager::ReorientStaticMesh(UStaticMesh& Mesh, const std::function<FVector(const FVector&)>& Rotate)
 {
