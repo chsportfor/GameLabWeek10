@@ -62,23 +62,79 @@ namespace
 		return ToEnginePosition(V, UpVector, UpSign).GetSafeNormal();
 	}
 
-	FQuat ToEngineQuat(const FbxQuaternion& Q, FbxAxisSystem::EUpVector UpVector, int UpSign = 1)
-	{
-		FVector V = ToEnginePosition(FbxVector4(Q[0], Q[1], Q[2], 0.0), UpVector, UpSign);
-		return FQuat(V.X, V.Y, V.Z, -static_cast<float>(Q[3]));
-	}
-
 	FMatrix ToEngineMatrix(const FbxAMatrix& FbxMat, FbxAxisSystem::EUpVector UpVector, int UpSign = 1)
 	{
-		FbxVector4 T = FbxMat.GetT();
-		FbxQuaternion Q = FbxMat.GetQ();
-		FbxVector4 S = FbxMat.GetS();
+		FbxVector4 D_X, D_Y, D_Z;
+		if (UpVector == FbxAxisSystem::eYAxis)
+		{
+			D_X = FbxVector4(0.0, 0.0, -1.0, 1.0);
+			D_Y = FbxVector4(1.0, 0.0, 0.0, 1.0);
+			D_Z = FbxVector4(0.0, static_cast<double>(UpSign), 0.0, 1.0);
+		}
+		else if (UpVector == FbxAxisSystem::eZAxis)
+		{
+			D_X = FbxVector4(1.0, 0.0, 0.0, 1.0);
+			D_Y = FbxVector4(0.0, -1.0, 0.0, 1.0);
+			D_Z = FbxVector4(0.0, 0.0, static_cast<double>(UpSign), 1.0);
+		}
+		else if (UpVector == FbxAxisSystem::eXAxis)
+		{
+			D_X = FbxVector4(0.0, 1.0, 0.0, 1.0);
+			D_Y = FbxVector4(0.0, 0.0, 1.0, 1.0);
+			D_Z = FbxVector4(static_cast<double>(UpSign), 0.0, 0.0, 1.0);
+		}
+		else
+		{
+			D_X = FbxVector4(1.0, 0.0, 0.0, 1.0);
+			D_Y = FbxVector4(0.0, 1.0, 0.0, 1.0);
+			D_Z = FbxVector4(0.0, 0.0, 1.0, 1.0);
+		}
 
-		FVector Pos = ToEnginePosition(T, UpVector, UpSign);
-		FVector Scale(static_cast<float>(S[0]), static_cast<float>(S[1]), static_cast<float>(S[2]));
-		FRotator Rot = ToEngineQuat(Q, UpVector, UpSign).ToFRotator();
+		FbxVector4 OriginFBX = FbxMat.MultT(FbxVector4(0.0, 0.0, 0.0, 1.0));
+		FbxVector4 PtX_FBX = FbxMat.MultT(D_X);
+		FbxVector4 PtY_FBX = FbxMat.MultT(D_Y);
+		FbxVector4 PtZ_FBX = FbxMat.MultT(D_Z);
 
-		return FTransform(Rot, Pos, Scale).GetLocalMatrix();
+		FVector OriginEng = ToEnginePosition(OriginFBX, UpVector, UpSign);
+		FVector PtX_Eng = ToEnginePosition(PtX_FBX, UpVector, UpSign);
+		FVector PtY_Eng = ToEnginePosition(PtY_FBX, UpVector, UpSign);
+		FVector PtZ_Eng = ToEnginePosition(PtZ_FBX, UpVector, UpSign);
+
+		FVector AxisX = PtX_Eng - OriginEng;
+		FVector AxisY = PtY_Eng - OriginEng;
+		FVector AxisZ = PtZ_Eng - OriginEng;
+
+		FMatrix Result;
+		Result.M[0][0] = AxisX.X; Result.M[0][1] = AxisX.Y; Result.M[0][2] = AxisX.Z; Result.M[0][3] = 0.0f;
+		Result.M[1][0] = AxisY.X; Result.M[1][1] = AxisY.Y; Result.M[1][2] = AxisY.Z; Result.M[1][3] = 0.0f;
+		Result.M[2][0] = AxisZ.X; Result.M[2][1] = AxisZ.Y; Result.M[2][2] = AxisZ.Z; Result.M[2][3] = 0.0f;
+		Result.M[3][0] = OriginEng.X; Result.M[3][1] = OriginEng.Y; Result.M[3][2] = OriginEng.Z; Result.M[3][3] = 1.0f;
+		return Result;
+	}
+
+	FTransform MatrixToTransform(const FMatrix& Mat)
+	{
+		FVector Pos(Mat.M[3][0], Mat.M[3][1], Mat.M[3][2]);
+		FVector XAxis(Mat.M[0][0], Mat.M[0][1], Mat.M[0][2]);
+		FVector YAxis(Mat.M[1][0], Mat.M[1][1], Mat.M[1][2]);
+		FVector ZAxis(Mat.M[2][0], Mat.M[2][1], Mat.M[2][2]);
+
+		float ScaleX = XAxis.Length();
+		float ScaleY = YAxis.Length();
+		float ScaleZ = ZAxis.Length();
+		FVector Scale(ScaleX, ScaleY, ScaleZ);
+
+		if (ScaleX > 0.00001f) XAxis /= ScaleX;
+		if (ScaleY > 0.00001f) YAxis /= ScaleY;
+		if (ScaleZ > 0.00001f) ZAxis /= ScaleZ;
+
+		FMatrix RotMat = FMatrix::Identity;
+		RotMat.M[0][0] = XAxis.X; RotMat.M[0][1] = XAxis.Y; RotMat.M[0][2] = XAxis.Z;
+		RotMat.M[1][0] = YAxis.X; RotMat.M[1][1] = YAxis.Y; RotMat.M[1][2] = YAxis.Z;
+		RotMat.M[2][0] = ZAxis.X; RotMat.M[2][1] = ZAxis.Y; RotMat.M[2][2] = ZAxis.Z;
+
+		FRotator Rot = MatrixToRotator(RotMat);
+		return FTransform(Rot, Pos, Scale);
 	}
 
 	int32 FindBoneIndex(const TArray<FBoneInfo>& Bones, const FString& BoneName)
@@ -131,21 +187,39 @@ namespace
 		}
 	}
 
+	bool HasSkeletonDescendant(FbxNode* Node)
+	{
+		if (!Node) return false;
+		FbxNodeAttribute* Attr = Node->GetNodeAttribute();
+		if (Attr && Attr->GetAttributeType() == FbxNodeAttribute::eSkeleton)
+		{
+			return true;
+		}
+		for (int32 i = 0; i < Node->GetChildCount(); ++i)
+		{
+			if (HasSkeletonDescendant(Node->GetChild(i)))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	void FindRootBones(FbxNode* Node, TArray<FbxNode*>& OutRootBones)
 	{
 		if (!Node) return;
 
-		FbxNodeAttribute* Attr = Node->GetNodeAttribute();
-		const bool bIsBone = (Attr && Attr->GetAttributeType() == FbxNodeAttribute::eSkeleton);
-
-		FbxNode* ParentNode = Node->GetParent();
-		FbxNodeAttribute* ParentAttr = ParentNode ? ParentNode->GetNodeAttribute() : nullptr;
-		const bool bParentIsBone = (ParentAttr && ParentAttr->GetAttributeType() == FbxNodeAttribute::eSkeleton);
-
-		if (bIsBone && !bParentIsBone)
+		if (HasSkeletonDescendant(Node))
 		{
-			OutRootBones.Add(Node);
-			return;
+			FbxNode* ParentNode = Node->GetParent();
+			const bool bParentIsSceneRoot = (ParentNode == nullptr || ParentNode->GetParent() == nullptr);
+			const bool bParentHasSkeleton = !bParentIsSceneRoot && HasSkeletonDescendant(ParentNode);
+
+			if (!bParentHasSkeleton)
+			{
+				OutRootBones.Add(Node);
+				return;
+			}
 		}
 
 		for (int32 i = 0; i < Node->GetChildCount(); ++i)
@@ -170,39 +244,40 @@ namespace
 		Bone.Name = Node->GetName();
 		Bone.ParentIndex = ParentIndex;
 
-		FbxAMatrix LocalFbxMat = Node->EvaluateLocalTransform();
-		FbxVector4 LocalT = LocalFbxMat.GetT();
-		FbxQuaternion LocalQ = LocalFbxMat.GetQ();
-		FbxVector4 LocalS = LocalFbxMat.GetS();
+		FbxAMatrix FbxGlobalMat = Node->EvaluateGlobalTransform();
+		FMatrix EngineGlobalMat = ToEngineMatrix(FbxGlobalMat, UpVector, UpSign);
 
-		Bone.LocalTransform.Location = ToEnginePosition(LocalT, UpVector, UpSign);
-		Bone.LocalTransform.Scale = FVector(
-			static_cast<float>(LocalS[0]),
-			static_cast<float>(LocalS[1]),
-			static_cast<float>(LocalS[2])
-		);
-		Bone.LocalTransform.Rotation = ToEngineQuat(LocalQ, UpVector, UpSign).ToFRotator();
-
-		OutMesh.Bones.Add(Bone);
-
-		FMatrix MyLocalMatrix = Bone.LocalTransform.GetLocalMatrix();
-		FMatrix MyGlobalMatrix;
+		FMatrix MyLocalMatrix;
 		if (ParentIndex >= 0)
 		{
-			MyGlobalMatrix = MyLocalMatrix * OutGlobalMatrices[ParentIndex];
+			MyLocalMatrix = EngineGlobalMat * OutGlobalMatrices[ParentIndex].Inverse();
 		}
 		else
 		{
-			MyGlobalMatrix = MyLocalMatrix;
+			MyLocalMatrix = EngineGlobalMat;
 		}
-		OutGlobalMatrices.Add(MyGlobalMatrix);
-		OutMesh.InverseBindPoseMatrices.Add(MyGlobalMatrix.Inverse());
+
+		Bone.LocalTransform = MatrixToTransform(MyLocalMatrix);
+		OutMesh.Bones.Add(Bone);
+
+		FMatrix CleanLocalMatrix = Bone.LocalTransform.GetLocalMatrix();
+		FMatrix CleanGlobalMatrix;
+		if (ParentIndex >= 0)
+		{
+			CleanGlobalMatrix = CleanLocalMatrix * OutGlobalMatrices[ParentIndex];
+		}
+		else
+		{
+			CleanGlobalMatrix = CleanLocalMatrix;
+		}
+
+		OutGlobalMatrices.Add(CleanGlobalMatrix);
+		OutMesh.InverseBindPoseMatrices.Add(CleanGlobalMatrix.Inverse());
 
 		for (int32 i = 0; i < Node->GetChildCount(); ++i)
 		{
 			FbxNode* ChildNode = Node->GetChild(i);
-			FbxNodeAttribute* ChildAttr = ChildNode ? ChildNode->GetNodeAttribute() : nullptr;
-			if (ChildAttr && ChildAttr->GetAttributeType() == FbxNodeAttribute::eSkeleton)
+			if (HasSkeletonDescendant(ChildNode))
 			{
 				BuildBoneHierarchy(ChildNode, MyIndex, OutMesh, UpVector, UpSign, OutGlobalMatrices);
 			}
@@ -642,7 +717,19 @@ bool FFbxImporter::ProcessGeometry(fbxsdk::FbxScene* Scene, FSkeletalMeshData& O
 		return false;
 	}
 
+	TArray<FbxNode*> SkinnedMeshNodes;
 	for (FbxNode* MeshNode : MeshNodes)
+	{
+		FbxMesh* Mesh = MeshNode->GetMesh();
+		if (Mesh && Mesh->GetDeformerCount(FbxDeformer::eSkin) > 0)
+		{
+			SkinnedMeshNodes.Add(MeshNode);
+		}
+	}
+
+	const TArray<FbxNode*>& TargetMeshNodes = SkinnedMeshNodes.IsEmpty() ? MeshNodes : SkinnedMeshNodes;
+
+	for (FbxNode* MeshNode : TargetMeshNodes)
 	{
 		FbxMesh* Mesh = MeshNode->GetMesh();
 		if (!Mesh) continue;
@@ -674,11 +761,6 @@ bool FFbxImporter::ProcessGeometry(fbxsdk::FbxScene* Scene, FSkeletalMeshData& O
 					HTR_LOG(Warning, "[FFbxImporter] Skin cluster bone '{}' not found in skeleton hierarchy!", BoneName);
 					continue;
 				}
-
-				FbxAMatrix TransformLinkMatrix;
-				Cluster->GetTransformLinkMatrix(TransformLinkMatrix);
-				FMatrix EngineLinkMatrix = ToEngineMatrix(TransformLinkMatrix, UpVector, UpSign);
-				OutMesh.InverseBindPoseMatrices[BoneIndex] = EngineLinkMatrix.Inverse();
 
 				int32 IndexCount = Cluster->GetControlPointIndicesCount();
 				const int32* Indices = Cluster->GetControlPointIndices();
@@ -735,6 +817,8 @@ bool FFbxImporter::ProcessGeometry(fbxsdk::FbxScene* Scene, FSkeletalMeshData& O
 			UVSetName = Mesh->GetElementUV(0)->GetName();
 		}
 
+		FbxAMatrix MeshGlobalTransform = MeshNode->EvaluateGlobalTransform();
+
 		for (int32 p = 0; p < PolygonCount; ++p)
 		{
 			int32 SlotIdx = 0;
@@ -762,7 +846,8 @@ bool FFbxImporter::ProcessGeometry(fbxsdk::FbxScene* Scene, FSkeletalMeshData& O
 				int32 CpIndex = Mesh->GetPolygonVertex(p, Corner);
 
 				FSkeletalVertex Vertex;
-				FVector Pos = ToEnginePosition(ControlPoints[CpIndex], UpVector, UpSign);
+				FbxVector4 WorldPos = MeshGlobalTransform.MultT(ControlPoints[CpIndex]);
+				FVector Pos = ToEnginePosition(WorldPos, UpVector, UpSign);
 				Vertex.Position = Pos;
 
 				OutMesh.AABB.Expand(FBox{ Pos, Pos });
@@ -770,7 +855,8 @@ bool FFbxImporter::ProcessGeometry(fbxsdk::FbxScene* Scene, FSkeletalMeshData& O
 				FbxVector4 FbxNormal;
 				if (Mesh->GetPolygonVertexNormal(p, Corner, FbxNormal))
 				{
-					Vertex.Normal = ToEngineDirection(FbxNormal, UpVector, UpSign);
+					FbxVector4 WorldNormal = MeshGlobalTransform.MultT(FbxNormal) - MeshGlobalTransform.MultT(FbxVector4(0.0, 0.0, 0.0, 1.0));
+					Vertex.Normal = ToEngineDirection(WorldNormal, UpVector, UpSign);
 				}
 				else
 				{

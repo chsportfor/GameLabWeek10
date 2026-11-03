@@ -4,6 +4,7 @@
 #include "PipelineState.h"
 #include "Buffer.h"
 #include "Mesh.h"
+#include "SkeletalMesh.h"
 #include "Shader.h"
 #include "Texture2D.h"
 #include "TextureCube.h"
@@ -115,8 +116,26 @@ void RenderCommand::BindShaderProgram(FShaderProgram* Shader)
 
 void RenderCommand::BindMesh(UStaticMesh* Mesh, uint32 LODIndex)
 {
-	BindVertexBuffer(Mesh->GetVertexBuffer(LODIndex));
-	BindIndexBuffer(Mesh->GetIndexBuffer(LODIndex));
+	if (Mesh)
+	{
+		BindVertexBuffer(Mesh->GetVertexBuffer(LODIndex));
+		BindIndexBuffer(Mesh->GetIndexBuffer(LODIndex));
+	}
+}
+
+void RenderCommand::BindMesh(USkeletalMesh* Mesh)
+{
+	if (Mesh)
+	{
+		BindVertexBuffer(Mesh->VertexBuffer.get());
+		BindIndexBuffer(Mesh->IndexBuffer.get());
+	}
+}
+
+void RenderCommand::BindGeometry(FVertexBuffer* VertexBuffer, FIndexBuffer* IndexBuffer)
+{
+	BindVertexBuffer(VertexBuffer);
+	BindIndexBuffer(IndexBuffer);
 }
 
 void RenderCommand::Draw(uint32 VertexCount, uint32 StartIndexLocation)

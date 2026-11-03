@@ -17,7 +17,7 @@ static_assert(std::is_trivially_copyable_v<FBox>);
 
 namespace
 {
-	constexpr uint32 SkeletalBakeVersion{ 1 };
+	constexpr uint32 SkeletalBakeVersion{ 2 };
 
 	struct FBakeHeader
 	{

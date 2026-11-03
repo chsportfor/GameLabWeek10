@@ -4,6 +4,7 @@
 
 class FBuffer;
 class UStaticMesh;
+class USkeletalMesh;
 class UTexture2D;
 class FShaderProgram;
 class FVertexShader;
@@ -53,6 +54,8 @@ public:
 	static void BindPipelineState(const FPipelineState& PipelineState);
 
 	static void BindMesh(UStaticMesh* Mesh, uint32 LODIndex = 0);
+	static void BindMesh(USkeletalMesh* Mesh);
+	static void BindGeometry(FVertexBuffer* VertexBuffer, FIndexBuffer* IndexBuffer);
 
 	static void BindShaderProgram(FShaderProgram* Shader);
 

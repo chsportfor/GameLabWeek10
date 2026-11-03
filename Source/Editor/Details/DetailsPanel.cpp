@@ -6,6 +6,8 @@
 #include "Editor/HitoriEd/EditorResourcePaths.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Render/SkeletalMesh.h"
 #include "Components/TextRenderComponent.h"
 #include "Components/ParticleSubUVComponent.h"
 #include "Components/LightComponent.h"
@@ -327,6 +329,68 @@ namespace
 						MeshComponent->SetStaticMesh(Item.Mesh);
 					else
 						*StaticMeshPtr = Item.Mesh;
+				}
+				ImGui::PopID();
+				if (bSelected)
+					ImGui::SetItemDefaultFocus();
+			}
+			ImGui::EndCombo();
+		}
+	}
+
+	void DrawSkeletalMeshSlot(UObject* Owner, USkeletalMesh** SkeletalMeshPtr)
+	{
+		USkeletalMesh* Current = *SkeletalMeshPtr;
+
+		FString CurrentPath = Current ? Current->GetPath() : "";
+		FString CurrentFileName = Current ? GetAssetDisplayName(CurrentPath) : "None";
+
+		ImGui::SetNextItemWidth(-1.0f);
+
+		bool bOpen = ImGui::BeginCombo("##SkeletalMesh", CurrentFileName.c_str());
+		if (ImGui::IsItemHovered() && Current)
+		{
+			ImGui::SetTooltip("%s", CurrentPath.c_str());
+		}
+
+		if (bOpen)
+		{
+			struct FSkelMeshItem
+			{
+				FString DisplayName;
+				FString Path;
+				USkeletalMesh* Mesh;
+			};
+
+			TArray<FSkelMeshItem> Items;
+			for (TObjectIterator<USkeletalMesh> Itr; Itr; ++Itr)
+			{
+				FString ItemPath = Itr->GetPath();
+				Items.Add({ GetAssetDisplayName(ItemPath), ItemPath, *Itr });
+			}
+			std::sort(Items.begin(), Items.end(), [](const FSkelMeshItem& A, const FSkelMeshItem& B)
+			{
+				return _stricmp(A.DisplayName.c_str(), B.DisplayName.c_str()) < 0;
+			});
+
+			for (const FSkelMeshItem& Item : Items)
+			{
+				bool bSelected = (Item.Mesh == Current);
+
+				ImGui::PushID(Item.Mesh);
+
+				const bool bClicked = ImGui::Selectable(Item.DisplayName.c_str(), bSelected);
+				if (ImGui::IsItemHovered())
+				{
+					ImGui::SetTooltip("%s", Item.Path.c_str());
+				}
+
+				if (bClicked)
+				{
+					if (USkeletalMeshComponent* MeshComponent = Cast<USkeletalMeshComponent>(Owner))
+						MeshComponent->SetSkeletalMesh(Item.Mesh);
+					else
+						*SkeletalMeshPtr = Item.Mesh;
 				}
 				ImGui::PopID();
 				if (bSelected)
@@ -890,6 +954,10 @@ namespace
 			else if (Property.Class == UStaticMesh::StaticClass())
 			{
 				DrawMeshSlot(Object, reinterpret_cast<UStaticMesh**>(ObjPtr));
+			}
+			else if (Property.Class == USkeletalMesh::StaticClass())
+			{
+				DrawSkeletalMeshSlot(Object, reinterpret_cast<USkeletalMesh**>(ObjPtr));
 			}
 			break;
 		}

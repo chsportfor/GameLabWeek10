@@ -1,4 +1,4 @@
-#include "EnginePCH.h"
+﻿#include "EnginePCH.h"
 #include "Renderer.h"
 #include "FShadowViewRenderer.h"
 #include "ShadowSettings.h"
@@ -67,7 +67,7 @@ namespace
 		}
 
 		return (static_cast<uint64>(Packet.Material->SortID) << 47)
-			| (static_cast<uint64>(Packet.Mesh->SortID) << 31)
+			| (static_cast<uint64>(Packet.GetGeometrySortID()) << 31)
 			| (static_cast<uint64>(Packet.LODIndex & 0x3) << 29);
 	}
 
@@ -512,7 +512,7 @@ void FRenderer::RenderQueueSorting(FRenderQueue& InQueue, const FViewConstants& 
 		for (uint32 i = 0; i < RenderPackets.Num(); ++i)
 		{
 			const FRenderPacket& P = RenderPackets[i];
-			if (!P.Mesh || !P.Material) continue;
+			if (!P.HasGeometry() || !P.Material) continue;
 			SortEntries.Add({ MakeSortKey(P), i });
 		}
 
@@ -895,21 +895,31 @@ void FRenderer::DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProject
 {
 	SCOPE_CYCLE_COUNTER(STAT_DrawRenderPackets);
 
-	LastMesh = nullptr;
-	LastMaterial = nullptr;
-	uint8 LastLODIndex = 0;
+	FVertexBuffer* LastVB = nullptr;
+	FIndexBuffer* LastIB = nullptr;
+	UMaterial* LastMaterial = nullptr;
 
 	RenderCommand::BindConstantBuffer(0, ViewCB.get(), EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
 
-
-	for (uint32 k = Begin; k < End; ++k)          // k = 정렬된 위치
+	for (uint32 k = Begin; k < End; ++k)
 	{
 		const uint32 PacketIndex = SortEntries[k].PacketIndex;
 		const FRenderPacket& RenderPacket = RenderPackets[PacketIndex];
-		//if (RenderPacket.Mesh == nullptr || RenderPacket.Material == nullptr) continue;
-		if (RenderPacket.Mesh != LastMesh || RenderPacket.LODIndex != LastLODIndex) {
-			RenderCommand::BindMesh(RenderPacket.Mesh, RenderPacket.LODIndex);
+
+		FVertexBuffer* CurVB = RenderPacket.GetVertexBuffer();
+		FIndexBuffer* CurIB = RenderPacket.GetIndexBuffer();
+
+		if (CurVB != LastVB)
+		{
+			RenderCommand::BindVertexBuffer(CurVB);
+			LastVB = CurVB;
 		}
+		if (CurIB != LastIB)
+		{
+			RenderCommand::BindIndexBuffer(CurIB);
+			LastIB = CurIB;
+		}
+
 		if (RenderPacket.Material != LastMaterial) {
 			BindMaterial(RenderPacket.Material);
 		}
@@ -926,12 +936,11 @@ void FRenderer::DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProject
 		}
 
 		RenderCommand::DrawIndexed(
-			RenderPacket.IndexCount ? RenderPacket.IndexCount : RenderPacket.Mesh->GetIndexBuffer(RenderPacket.LODIndex)->GetIndexCount(),
+			RenderPacket.GetEffectiveIndexCount(),
 			RenderPacket.StartIndex
 		);
+
 		LastMaterial = RenderPacket.Material;
-		LastMesh = RenderPacket.Mesh;
-		LastLODIndex = RenderPacket.LODIndex;
 	}
 }
 
@@ -939,32 +948,35 @@ FOcclusionMeasureResult FRenderer::MeasureOpaqueOcclusion(const FMatrix& ViewPro
 {
 	FOcclusionMeasureResult Result;
 
-	// 불투명 드로우를 두 경로(스태틱 묶음, 일반 패킷)에서 한 목록으로 모은다. 그린 순서와 같게 묶음 먼저.
 	struct FMeasureDraw
 	{
-		UStaticMesh* Mesh;
+		FVertexBuffer* VertexBuffer;
+		FIndexBuffer* IndexBuffer;
 		UMaterial* Material;
-		uint8 LODIndex;
 		uint32 Slot;
 		uint32 StartIndex;
 		uint32 IndexCount;
-		const FMatrix* World;       // 칸이 없을 때만 쓴다
-		const void* ObjectKey;      // 같은 물체의 섹션을 한 물체로 센다
+		const FMatrix* World;
+		const void* ObjectKey;
 		bool bOccludedByGpu;
 		const FRenderPacket* Packet;
 	};
 	std::vector<FMeasureDraw> Draws;
 	for (const FStaticDrawGroup* Group : StaticGroups)
+	{
+		FVertexBuffer* VB = Group->Mesh ? Group->Mesh->GetVertexBuffer(Group->LODIndex) : nullptr;
+		FIndexBuffer* IB = Group->Mesh ? Group->Mesh->GetIndexBuffer(Group->LODIndex) : nullptr;
 		for (const FStaticDrawItem& Item : Group->Items)
-			Draws.push_back({ Group->Mesh, Group->Material, Group->LODIndex, Item.Slot, Item.StartIndex, Item.IndexCount,
+		{
+			Draws.push_back({ VB, IB, Group->Material, Item.Slot, Item.StartIndex, Item.IndexCount,
 				&Item.Proxy->GetLocalToWorld(), Item.Proxy, Item.bOccludedByGpu != 0, nullptr });
+		}
+	}
 	for (uint32 k = 0; k < FirstTranslucentIndex; ++k)
 	{
 		const FRenderPacket& Packet = RenderPackets[SortEntries[k].PacketIndex];
-		const uint32 IndexCount = Packet.IndexCount ? Packet.IndexCount : Packet.Mesh->GetIndexBuffer(Packet.LODIndex)->GetIndexCount();
-		// 프록시가 없는 패킷(빌보드 등)은 패킷 자체를 한 물체로 센다.
 		const void* Key = Packet.Proxy ? static_cast<const void*>(Packet.Proxy) : static_cast<const void*>(&Packet);
-		Draws.push_back({ Packet.Mesh, Packet.Material, Packet.LODIndex, Packet.Slot, Packet.StartIndex, IndexCount,
+		Draws.push_back({ Packet.GetVertexBuffer(), Packet.GetIndexBuffer(), Packet.Material, Packet.Slot, Packet.StartIndex, Packet.GetEffectiveIndexCount(),
 			&GetPacketWorld(Packet), Key, Packet.bOccludedByGpu, &Packet });
 	}
 
@@ -977,8 +989,6 @@ FOcclusionMeasureResult FRenderer::MeasureOpaqueOcclusion(const FMatrix& ViewPro
 	ID3D11Device* Device = RenderCommand::GetDevice();
 	ID3D11DeviceContext* Context = RenderCommand::GetContext();
 
-	// 같은 셰이더·같은 행렬로 다시 그리면 깊이가 비트 단위로 같으므로,
-	// LESS_EQUAL이면 최종 깊이 버퍼에서 이 물체가 이긴 픽셀만 통과한다.
 	if (!DepthLessEqualReadOnly)
 	{
 		D3D11_DEPTH_STENCIL_DESC Desc{};
@@ -1002,23 +1012,30 @@ FOcclusionMeasureResult FRenderer::MeasureOpaqueOcclusion(const FMatrix& ViewPro
 	if (!bUsePerObjectSlots)
 		RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
 
-	UStaticMesh* BoundMesh = nullptr;
+	FVertexBuffer* BoundVB = nullptr;
+	FIndexBuffer* BoundIB = nullptr;
 	UMaterial* BoundMaterial = nullptr;
-	uint8 BoundLOD = 0;
 
-	// 1) 드로우마다 쿼리를 걸고 다시 그린다. 본 패스와 같은 바인딩(칸 또는 PerObjectCB)을 쓴다.
 	for (uint32 Index = 0; Index < Count; ++Index)
 	{
 		const FMeasureDraw& Draw = Draws[Index];
 
-		if (Draw.Mesh != BoundMesh || Draw.LODIndex != BoundLOD)
-			RenderCommand::BindMesh(Draw.Mesh, Draw.LODIndex);
+		if (Draw.VertexBuffer != BoundVB)
+		{
+			RenderCommand::BindVertexBuffer(Draw.VertexBuffer);
+			BoundVB = Draw.VertexBuffer;
+		}
+		if (Draw.IndexBuffer != BoundIB)
+		{
+			RenderCommand::BindIndexBuffer(Draw.IndexBuffer);
+			BoundIB = Draw.IndexBuffer;
+		}
 		if (Draw.Material != BoundMaterial)
 		{
 			BindMaterial(Draw.Material);
-			// BindMaterial이 바꾼 상태를 측정용으로 덮어쓴다.
 			RenderCommand::SetBlendState(EBlendState::NoColorWrite);
 			Context->OMSetDepthStencilState(DepthLessEqualReadOnly.Get(), 0);
+			BoundMaterial = Draw.Material;
 		}
 		if (Draw.Packet && (Draw.Material != BoundMaterial || Draw.Packet->MaterialParamData))
 			UpdateMaterialParams(*Draw.Packet);
@@ -1037,9 +1054,9 @@ FOcclusionMeasureResult FRenderer::MeasureOpaqueOcclusion(const FMatrix& ViewPro
 		RenderCommand::DrawIndexed(Draw.IndexCount, Draw.StartIndex);
 		Context->End(Query);
 
-		BoundMesh = Draw.Mesh;
+		BoundVB = Draw.VertexBuffer;
+		BoundIB = Draw.IndexBuffer;
 		BoundMaterial = Draw.Material;
-		BoundLOD = Draw.LODIndex;
 	}
 
 	// 2) 결과를 기다려 모은다. 한 물체가 Section 여러 개로 나뉘면 하나라도 보이면 보이는 것으로 친다.
