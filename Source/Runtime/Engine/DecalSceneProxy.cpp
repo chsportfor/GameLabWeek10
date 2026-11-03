@@ -23,6 +23,7 @@ void FDecalSceneProxy::UpdateTransform()
 void FDecalSceneProxy::UpdateRenderState()
 {
 	DecalTexture = Component->GetDecalTexture();
+	DecalNormalTexture = Component->GetDecalNormalTexture();
 	DecalColor = Component->GetDecalColor();
 	SortOrder = Component->GetSortOrder();
 	bAdditive = Component->IsAdditive();
@@ -205,10 +206,12 @@ void FDecalSceneProxy::BuildProjectedMesh(const FScene& Scene)
 				continue;
 			}
 
-			const FVector Offset = Cross.Normalized() * ProjectedDecalSurfaceOffset;
+			const FVector SurfaceNormal = Cross.Normalized();
+			const FVector Offset = SurfaceNormal * ProjectedDecalSurfaceOffset;
 			for (FDecalVertex& Vertex : Vertices)
 			{
 				Vertex.Position = Vertex.Position + Offset;
+				Vertex.Normal = SurfaceNormal;
 				ProjectedVertices.Add(Vertex);
 			}
 		}

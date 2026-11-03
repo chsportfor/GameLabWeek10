@@ -144,6 +144,8 @@ Texture2D NormalTexture : register(t1);
 #if !defined(EDITOR_ARROW_SHADER)
 Texture2D DBuffer : register(t8);
 Texture2D AdditiveBuffer : register(t9);
+// rgb = 알파를 곱한 (월드 법선 * 0.5 + 0.5), a = Decal이 덮은 정도
+Texture2D NormalDBuffer : register(t11);
 #endif
 SamplerState MaterialSampler : register(s0);
 SamplerComparisonState PCFSampler : register(s1);
@@ -913,7 +915,19 @@ float4 mainPS(VS_OUTPUT Input) : SV_TARGET
     const float3 T = { bWorldUV ? WorldUVTangent : MeshT };
     const float3 B = { bWorldUV ? WorldUVBitangent : cross(VertexNormal, MeshT) * (Input.Tangent.w < 0.0f ? -1.0f : 1.0f) };
     const float3 TangentNormal = { NormalTexture.Sample(MaterialSampler, UV).xyz * 2.0f - 1.0f };
-    const float3 N = { normalize(T * TangentNormal.x + B * -TangentNormal.y + VertexNormal * TangentNormal.z) };
+    float3 N = { normalize(T * TangentNormal.x + B * -TangentNormal.y + VertexNormal * TangentNormal.z) };
+#if !defined(EDITOR_ARROW_SHADER)
+    // Decal 법선으로 교체한다. 블렌딩으로 rgb에 알파가 곱해져 있어 (rgb * 2 - a)가 알파를 곱한 법선이다.
+    // 그림자 바이어스는 실제 표면 기준이어야 하므로 VertexNormal은 그대로 둔다.
+    if (Input.ReceivesDecal && bOpaque > 0.5f)
+    {
+        const float4 DecalNormal = NormalDBuffer.Load(int3(Input.SvPosition.xy, 0));
+        if (DecalNormal.a > 0.0f)
+        {
+            N = normalize(N * (1.0f - DecalNormal.a) + (DecalNormal.rgb * 2.0f - DecalNormal.a));
+        }
+    }
+#endif
 #endif
 
     // Opaque는 알파를 1로 고정한다. 뷰포트 RT를 ImGui가 알파 블렌딩으로 그리므로 알파가 남으면 비쳐 보인다

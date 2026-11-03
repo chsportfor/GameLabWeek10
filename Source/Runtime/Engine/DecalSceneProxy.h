@@ -26,6 +26,7 @@ public:
 	const FMatrix& GetWorldToDecal() const { return WorldToDecal; }
 	const FAABB& GetBounds() const { return Bounds; }
 	UTexture2D* GetDecalTexture() const { return DecalTexture; }
+	UTexture2D* GetDecalNormalTexture() const { return DecalNormalTexture; }
 	const FLinearColor& GetDecalColor() const { return DecalColor; }
 	int32 GetSortOrder() const { return SortOrder; }
 	float GetFadeAlpha() const { return FadeAlpha; }
@@ -59,6 +60,7 @@ private:
 	FAABB	Bounds;
 	FScene* Scene = nullptr;
 	UTexture2D*		DecalTexture = nullptr;
+	UTexture2D*		DecalNormalTexture = nullptr;
 	FLinearColor	DecalColor = FLinearColor(1, 1, 1, 1);
 	const UDecalComponent* Component = nullptr;
 

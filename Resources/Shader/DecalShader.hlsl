@@ -1,5 +1,6 @@
 #pragma pack_matrix(row_major)
 #include "ColorSpace.hlsli"
+#include "DecalCommon.hlsli"
 
 cbuffer DecalConstants : register(b0)
 {
@@ -9,11 +10,12 @@ cbuffer DecalConstants : register(b0)
     float4 DecalColor;
     float2 ViewSize; // 뷰의 픽셀 크기
     float NormalThreshold; // cos(최대 각도)
-    float Padding;
+    float bHasNormalTexture; // 1이면 노말 맵을 쓴다
 };
 
 Texture2D<float> SceneDepth : register(t0);
 Texture2D DecalTexture : register(t1);
+Texture2D DecalNormalTexture : register(t2);
 SamplerState DecalSampler : register(s0);
 
 struct PSInput
@@ -29,7 +31,7 @@ float4 mainVS(float3 Position : POSITION) : SV_POSITION
     return mul(float4(Position * 2.0f, 1.0f), DecalToClip); // 큐브가 0.5라서 2를 곱한다.
 }
 
-float4 mainPS(float4 SvPosition : SV_POSITION) : SV_Target
+FDecalOutput mainPS(float4 SvPosition : SV_POSITION)
 {
     float Depth = SceneDepth.Load(int3(SvPosition.xy, 0));
     
@@ -58,5 +60,16 @@ float4 mainPS(float4 SvPosition : SV_POSITION) : SV_Target
     float4 Tex = DecalTexture.Sample(DecalSampler, DecalUV);
 
     float3 Color = SRGBToLinear(Tex.rgb) * SRGBToLinear(DecalColor.rgb);
-    return float4(Color, Tex.a * DecalColor.a);
+    const float Alpha = Tex.a * DecalColor.a;
+
+    FDecalOutput Output;
+    Output.Color = float4(Color, Alpha);
+    Output.Normal = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    if (bHasNormalTexture > 0.5f)
+    {
+        // 언리얼처럼 법선도 색과 같은 알파로 덮는다.
+        const float3 TangentNormal = DecalNormalTexture.Sample(DecalSampler, DecalUV).xyz * 2.0f - 1.0f;
+        Output.Normal = EncodeDecalNormal(GetDecalWorldNormal(SurfaceNormal, WorldToDecal, TangentNormal), Alpha);
+    }
+    return Output;
 }

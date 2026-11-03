@@ -470,6 +470,40 @@ FTexture2D* FRenderer::GetAdditiveBuffer() const
 	return (AdditiveBuffer.get());
 }
 
+bool FRenderer::EnsureNormalDBuffer(uint32 InNormalDBufferWidth, uint32 InNormalDBufferHeight)
+{
+	if (InNormalDBufferWidth == 0 || InNormalDBufferHeight == 0)
+	{
+		return (false);
+	}
+	if (!NormalDBuffer || NormalDBuffer->GetWidth() < InNormalDBufferWidth || NormalDBuffer->GetHeight() < InNormalDBufferHeight)
+	{
+		D3D11_TEXTURE2D_DESC Desc{};
+		Desc.Width = NormalDBuffer ? std::max(InNormalDBufferWidth, NormalDBuffer->GetWidth()) : InNormalDBufferWidth;
+		Desc.Height = NormalDBuffer ? std::max(InNormalDBufferHeight, NormalDBuffer->GetHeight()) : InNormalDBufferHeight;
+		Desc.MipLevels = 1;
+		// 법선은 색이 아니므로 sRGB 변환 없이 그대로 저장한다.
+		Desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		Desc.SampleDesc.Count = 1;
+		Desc.Usage = D3D11_USAGE_DEFAULT;
+		Desc.ArraySize = 1;
+		Desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+		NormalDBuffer = RenderCommand::CreateTexture2D(Desc);
+
+		return (NormalDBuffer && NormalDBuffer->GetRTV() != nullptr);
+	}
+	else
+	{
+		return (true);
+	}
+}
+
+FTexture2D* FRenderer::GetNormalDBuffer() const
+{
+	return (NormalDBuffer.get());
+}
+
 
 
 // 카메라의 ViewProjection을 공통 렌더 경로로 전달한다.
@@ -499,10 +533,13 @@ void FRenderer::RenderOpaque(const FMatrix& ViewProjection)
 		RenderCommand::BindShaderResource(8, DBuffer.get(), EShaderBindFlagBits::Pixel);
 	if (AdditiveBuffer)
 		RenderCommand::BindShaderResource(9, AdditiveBuffer.get(), EShaderBindFlagBits::Pixel);
+	if (NormalDBuffer)
+		RenderCommand::BindShaderResource(11, NormalDBuffer.get(), EShaderBindFlagBits::Pixel);
 	DrawStaticGroups();
 	DrawPackets(0, FirstTranslucentIndex, ViewProjection);
 	RenderCommand::UnbindShaderResource(8, EShaderBindFlagBits::Pixel);
 	RenderCommand::UnbindShaderResource(9, EShaderBindFlagBits::Pixel);
+	RenderCommand::UnbindShaderResource(11, EShaderBindFlagBits::Pixel);
 }
 
 // RenderOpaque가 남긴 반투명 패킷을 먼 것부터 그린다.

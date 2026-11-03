@@ -64,6 +64,17 @@ void UDecalComponent::SetDecalTexture(UTexture2D* InDecalTexture)
 	MarkRenderStateDirty();
 }
 
+UTexture2D* UDecalComponent::GetDecalNormalTexture() const
+{
+	return (DecalNormalTexture);
+}
+
+void UDecalComponent::SetDecalNormalTexture(UTexture2D* InDecalNormalTexture)
+{
+	DecalNormalTexture = InDecalNormalTexture;
+	MarkRenderStateDirty();
+}
+
 void UDecalComponent::SetDecalColor(const FLinearColor& InDecalColor)
 {
 	DecalColor = InDecalColor;
@@ -218,7 +229,7 @@ void UDecalComponent::PostEditChangeProperty(const FProperty& Property)
 	{
 		OnTransformDirty();
 	}
-	else if (Property.Name == "DecalTexture" || Property.Name == "DecalColor"
+	else if (Property.Name == "DecalTexture" || Property.Name == "DecalNormalTexture" || Property.Name == "DecalColor"
 		|| Property.Name == "SortOrder" || Property.Name == "bAdditive" 
 		|| Property.Name == "FadeScreenSize")
 	{

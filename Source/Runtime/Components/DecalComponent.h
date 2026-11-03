@@ -11,6 +11,7 @@ class UDecalComponent : public USceneComponent
     DECLARE_CLASS(UDecalComponent, USceneComponent)
     REFLECT_START(UDecalComponent)
         PROPERTY(DecalTexture)
+        PROPERTY(DecalNormalTexture)
         PROPERTY(DecalSize)
         PROPERTY(DecalColor)
         PROPERTY(SortOrder)
@@ -41,6 +42,9 @@ public:
 
     UTexture2D* GetDecalTexture() const;
     void SetDecalTexture(UTexture2D* InDecalTexture);
+    // 없으면 nullptr. 이때 Decal은 법선을 바꾸지 않는다.
+    UTexture2D* GetDecalNormalTexture() const;
+    void SetDecalNormalTexture(UTexture2D* InDecalNormalTexture);
     void SetDecalColor(const FLinearColor& InDecalColor);
     void SetSortOrder(int32 InSortOrder);
     void SetDecalSize(const FVector& InDecalSize);
@@ -59,6 +63,7 @@ public:
     FDecalSceneProxy* SceneProxy = nullptr;
 protected:
     UTexture2D* DecalTexture = nullptr;
+    UTexture2D* DecalNormalTexture = nullptr;
 
 private:
     

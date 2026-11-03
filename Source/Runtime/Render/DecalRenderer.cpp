@@ -121,7 +121,15 @@ void FDecalRenderer::DrawDecals(
 		DecalConstants.DecalInfo.DecalColor.A *= DecalSceneProxy->GetFadeAlpha() * ScreenAlpha;
 
 
+		// Additive Decal은 빛만 더하므로 법선을 바꾸지 않는다.
+		UTexture2D* NormalTexture = bAdditive ? nullptr : DecalSceneProxy->GetDecalNormalTexture();
+		DecalConstants.DecalInfo.bHasNormalTexture = NormalTexture ? 1.0f : 0.0f;
+
 		RenderCommand::BindShaderResource(1, DecalSceneProxy->GetDecalTexture(), EShaderBindFlagBits::Pixel);
+		if (NormalTexture)
+		{
+			RenderCommand::BindShaderResource(2, NormalTexture, EShaderBindFlagBits::Pixel);
+		}
 		RenderCommand::UpdateBufferData(ConstantBuffer.get(), &DecalConstants);
 		RenderCommand::BindConstantBuffer(0, ConstantBuffer.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 		if (bProjected)
@@ -186,7 +194,8 @@ void FDecalRenderer::OnRender(
 	SCOPE_CYCLE_COUNTER(DecalStats::STAT_RenderCPU);
 	FStatRegistry::SetCounter(DecalStats::STAT_Total, Decals.Num());
 
-	if (!Renderer->EnsureDBuffer(Viewport.Width, Viewport.Height) || !Renderer->EnsureAdditiveBuffer(Viewport.Width, Viewport.Height))
+	if (!Renderer->EnsureDBuffer(Viewport.Width, Viewport.Height) || !Renderer->EnsureAdditiveBuffer(Viewport.Width, Viewport.Height)
+		|| !Renderer->EnsureNormalDBuffer(Viewport.Width, Viewport.Height))
 	{
 		return;
 	}
@@ -198,8 +207,14 @@ void FDecalRenderer::OnRender(
 	ColorDesc.ClearValue.ColorClearValue = FVector4(0, 0, 0, 0);
 	DecalPass.ColorRenderTargets.Add(ColorDesc);
 
+	// Additive 패스는 법선을 쓰지 않으므로 Normal DBuffer를 넣기 전에 복사한다.
 	FRenderingInfo AdditivePass = DecalPass;
 	AdditivePass.ColorRenderTargets[0].Texture = Renderer->GetAdditiveBuffer();
+
+	// 같은 Decal 패스에서 MRT로 색과 법선을 함께 쓴다. 알파 0으로 비워 Decal이 없는 곳은 법선을 바꾸지 않는다.
+	FRenderingDesc NormalDesc = ColorDesc;
+	NormalDesc.Texture = Renderer->GetNormalDBuffer();
+	DecalPass.ColorRenderTargets.Add(NormalDesc);
 
 	//정렬 순서 SortOrder → 텍스처 포인터 → 프록시 주소
 
@@ -258,4 +273,5 @@ void FDecalRenderer::OnRender(
 
 	RenderCommand::UnbindShaderResource(0, EShaderBindFlagBits::Pixel);
 	RenderCommand::UnbindShaderResource(1, EShaderBindFlagBits::Pixel);
+	RenderCommand::UnbindShaderResource(2, EShaderBindFlagBits::Pixel);
 }

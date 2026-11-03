@@ -38,4 +38,5 @@ struct FDecalVertex
 {
 	FVector Position;
 	FVector2 UV;
+	FVector Normal;	// 잘린 삼각형의 월드 법선. 노말 Decal의 접선 축을 표면에 맞출 때 쓴다.
 };
