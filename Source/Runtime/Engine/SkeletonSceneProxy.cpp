@@ -32,5 +32,4 @@ void FSkeletalMeshSceneProxy::UpdateRenderState()
 		if (SkeletalMesh) SkeletalMesh->RegisterProxy(this);
 		if (FScene* Scene = GetScene()) Scene->MarkDirty(this);
 	}
-	// Section별 Material과 GPU 버퍼 연결은 렌더 리소스를 준비한 뒤 추가한다.
 }

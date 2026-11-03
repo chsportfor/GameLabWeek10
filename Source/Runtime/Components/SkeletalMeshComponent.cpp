@@ -7,45 +7,12 @@ FPrimitiveSceneProxy* USkeletalMeshComponent::CreateSceneProxy()
 	return new FSkeletalMeshSceneProxy(this);
 }
 
-void USkeletalMeshComponent::SetSkeletalMesh(USkeletalMesh* InSkeletalMesh)
-{
-	if (SkeletalMesh == InSkeletalMesh)
-		return;
-
-	SkeletalMesh = InSkeletalMesh;
-	ClearOverrideMaterials();
-	MarkRenderStateDirty();
-	OnTransformDirty();
-}
-
-int32 USkeletalMeshComponent::GetNumMaterials() const
-{
-	return SkeletalMesh ? SkeletalMesh->Materials.Num() : 0;
-}
-
-FString USkeletalMeshComponent::GetMaterialSlotName(int32 SlotIndex) const
-{
-	if (!SkeletalMesh || SlotIndex < 0 || SlotIndex >= GetNumMaterials()) return {};
-	// Materials는 파트별 MaterialSlots를 같은 순서로 이어 붙인 배열이다.
-	for (const FSkeletalMesh& Part : SkeletalMesh->MeshData.Meshes)
-	{
-		if (SlotIndex < Part.MaterialSlots.Num()) return Part.MaterialSlots[SlotIndex].Name;
-		SlotIndex -= Part.MaterialSlots.Num();
-	}
-	return {};
-}
-
-UMaterial* USkeletalMeshComponent::GetDefaultMaterial(int32 SlotIndex) const
-{
-	return SkeletalMesh && SlotIndex >= 0
-		? SkeletalMesh->GetMaterial(static_cast<uint32>(SlotIndex)) : nullptr;
-}
-
 void USkeletalMeshComponent::SubmitToRenderQueue(FRenderQueue& RenderQueue)
 {
+	USkeletalMesh* SkeletalMesh = GetSkeletalMesh();
 	const FPrimitiveSceneProxy* Proxy = GetSceneProxy();
 	if (!SkeletalMesh || !Proxy || !Proxy->IsVisible()) return;
-	FVertexBuffer* VertexBuffer = SkeletalMesh->VertexBuffer.get();
+	FVertexBuffer* VertexBuffer = GetSkinnedVertexBuffer();
 	FIndexBuffer* IndexBuffer = SkeletalMesh->IndexBuffer.get();
 	if (!VertexBuffer || !IndexBuffer || !VertexBuffer->GetBuffer() || !IndexBuffer->GetBuffer()) return;
 

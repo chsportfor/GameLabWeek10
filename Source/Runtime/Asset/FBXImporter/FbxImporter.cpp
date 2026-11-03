@@ -6,6 +6,20 @@
 
 namespace
 {
+	FMatrix ToEngineMatrix(const FbxAMatrix& Matrix)
+	{
+		// SDK로 원점과 축을 변환해 엔진의 행벡터 행렬로 옮긴다. 스케일과 전단도 보존한다.
+		const FbxVector4 Origin = Matrix.MultT(FbxVector4(0.0, 0.0, 0.0, 1.0));
+		const FbxVector4 X = Matrix.MultT(FbxVector4(1.0, 0.0, 0.0, 1.0)) - Origin;
+		const FbxVector4 Y = Matrix.MultT(FbxVector4(0.0, 1.0, 0.0, 1.0)) - Origin;
+		const FbxVector4 Z = Matrix.MultT(FbxVector4(0.0, 0.0, 1.0, 1.0)) - Origin;
+		return FMatrix(
+			float(X[0]), float(X[1]), float(X[2]), 0.0f,
+			float(Y[0]), float(Y[1]), float(Y[2]), 0.0f,
+			float(Z[0]), float(Z[1]), float(Z[2]), 0.0f,
+			float(Origin[0]), float(Origin[1]), float(Origin[2]), 1.0f);
+	}
+
 	std::filesystem::path MakeUTF8Path(const FString& Path)
 	{
 		return std::filesystem::path(std::u8string(Path.begin(), Path.end()));
@@ -209,6 +223,29 @@ void FFbxImporter::ProcessMeshNode(FbxNode* Node, const TMap<FbxNode*, int32>& B
 		{
 			FbxMesh* Mesh = static_cast<FbxMesh*>(NodeAttri);
 			FSkeletalMesh SkeletalMesh = ProcessMesh(Mesh, BoneIndexByNode, FbxPath);
+
+			FbxAMatrix MeshTransform = Node->EvaluateGlobalTransform();
+			bool bFoundBindTransform = false;
+			for (int SkinIndex = 0; SkinIndex < Mesh->GetDeformerCount(FbxDeformer::eSkin) && !bFoundBindTransform; ++SkinIndex)
+			{
+				auto* Skin = static_cast<FbxSkin*>(Mesh->GetDeformer(SkinIndex, FbxDeformer::eSkin));
+				if (!Skin) continue;
+				for (int ClusterIndex = 0; ClusterIndex < Skin->GetClusterCount(); ++ClusterIndex)
+				{
+					FbxCluster* Cluster = Skin->GetCluster(ClusterIndex);
+					if (!Cluster) continue;
+					Cluster->GetTransformMatrix(MeshTransform);
+					bFoundBindTransform = true;
+					break;
+				}
+			}
+
+			// Control Point에 없는 Geometric Transform도 메시 Bind 변환에 포함한다.
+			FbxAMatrix Geometry;
+			Geometry.SetTRS(Node->GetGeometricTranslation(FbxNode::eSourcePivot),
+				Node->GetGeometricRotation(FbxNode::eSourcePivot),
+				Node->GetGeometricScaling(FbxNode::eSourcePivot));
+			SkeletalMesh.MeshTransform = ToEngineMatrix(MeshTransform * Geometry);
 			OutResult.Meshes.Add(SkeletalMesh);
 		}
 	}
@@ -338,19 +375,32 @@ void FFbxImporter::Cook(const FFbxImportResult& ImportResult, FSkeletalMeshData&
 
 	TArray<FMatrix> GlobalRefMatrix; // 부모 기준 Transform 저장하기 위한 임시배열
 	GlobalRefMatrix.Reserve(ImportResult.Bones.Num());
-	OutData.InverseBindPoseMat.Reset();
-	OutData.InverseBindPoseMat.Reserve(ImportResult.Bones.Num());
 
 	for (int i = 0; i < OutData.Bones.Num(); i++)
 	{
-		FTransform RefTransform = ImportResult.Bones[i].RefPoseTransform;
 		FMatrix RefMatrix = OutData.Bones[i].RefPoseTransform.GetLocalMatrix();
 		if (OutData.Bones[i].ParentIndex != -1)
 		{
 			RefMatrix = RefMatrix * GlobalRefMatrix[OutData.Bones[i].ParentIndex]; // 부모 기준 Bone Transform을 전역 기준 BindPose Transform으로 이동, 부모기준 Transform을 곱함
 		}
 		GlobalRefMatrix.Add(RefMatrix);	// 다음 계산시 부모 Transform으로 활용하기 위해 저장
-		OutData.InverseBindPoseMat.Add(RefMatrix.Inverse());	// Inverse한 행렬을 더해 InverBindPose를 채움, Bones[i]로 뽑았으므로 Bones 배열에 대응되는 순서로 저장
+	}
+
+	TArray<FMatrix> InverseGlobalRefMatrix;
+	InverseGlobalRefMatrix.Reserve(GlobalRefMatrix.Num());
+	for (const FMatrix& RefMatrix : GlobalRefMatrix)
+	{
+		InverseGlobalRefMatrix.Add(RefMatrix.Inverse());
+	}
+	for (FSkeletalMesh& Mesh : OutData.Meshes)
+	{
+		Mesh.InverseBindPoseMat.Reset();
+		Mesh.InverseBindPoseMat.Reserve(OutData.Bones.Num());
+		for (const FMatrix& InverseRefMatrix : InverseGlobalRefMatrix)
+		{
+			// 행벡터: 메시 로컬 -> FBX 전역 -> 본 바인드 로컬.
+			Mesh.InverseBindPoseMat.Add(Mesh.MeshTransform * InverseRefMatrix);
+		}
 	}
 }
 
