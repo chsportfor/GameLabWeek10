@@ -1074,7 +1074,10 @@ bool UWorld::LineTraceSingle(const FRay& WorldRay, FHitResult& OutHit, FBillboar
 
 	const auto TraceComponent = [&](FPrimitiveSceneProxy* Proxy, float& InOutNearestT)
 		{
-			const AActor* Owner{ Proxy && Proxy->GetComponent() ? Proxy->GetComponent()->GetOwner() : nullptr };
+			if (!Proxy || !Proxy->IsVisible())
+				return false;
+
+			const AActor* Owner{ Proxy->GetComponent() ? Proxy->GetComponent()->GetOwner() : nullptr };
 			while (Owner && IgnoreActor) {
 				if (Owner == IgnoreActor) {
 					return false;
@@ -1082,29 +1085,7 @@ bool UWorld::LineTraceSingle(const FRay& WorldRay, FHitResult& OutHit, FBillboar
 				Owner = Owner->GetAttachParentActor();
 			}
 
-			if (UStaticMesh* Mesh = Proxy ? Proxy->GetMesh() : nullptr)
-			{
-				if (!Proxy->IsVisible())
-					return false;
-
-				const FMatrix& WorldToLocal = Proxy->GetWorldToLocal();
-				const FRay LocalRay{
-					.Origin = WorldToLocal.TransformPosition(WorldRay.Origin),
-					.Direction = WorldToLocal.TransformVector(WorldRay.Direction)
-				};
-
-				float T = InOutNearestT;
-				if (!RayIntersectsMesh(LocalRay, Mesh->GetMeshData(), T))
-					return false;
-
-				OutHit.HitComponent = Proxy->GetComponent();
-				OutHit.Distance = T;
-				OutHit.ImpactPoint = WorldRay.Origin + WorldRay.Direction * T;
-				InOutNearestT = T;
-				return true;
-			}
-
-			UPrimitiveComponent* Component = Proxy ? Proxy->GetComponent() : nullptr;
+			UPrimitiveComponent* Component = Proxy->GetComponent();
 
 			if (!Component || !Component->IsVisible())
 				return false;

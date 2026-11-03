@@ -1,8 +1,9 @@
-﻿#pragma once
+#pragma once
 
 #include "Math/EngineMath.h"
 
 struct FStaticMeshData;
+struct FSkeletalMeshData;
 
 struct FRay
 {
@@ -39,6 +40,7 @@ bool RayIntersectsTriangle(const FRay& Ray, const FVector& v1, const FVector& v2
 bool RayIntersectsTriangleEdges(const FRay& Ray, const FVector& V0, const FVector& Edge1, const FVector& Edge2, float& OutT);
 
 bool RayIntersectsMesh(const FRay& LocalRay, const FStaticMeshData& Mesh, float& InOutNearestT);
+bool RayIntersectsMesh(const FRay& LocalRay, const FSkeletalMeshData& Mesh, float& InOutNearestT);
 
 FVector2 WorldToScreen(const FVector& WorldPos, const FMatrix& ViewProj, int ScreenW, int ScreenH);
 

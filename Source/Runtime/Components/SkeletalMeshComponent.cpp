@@ -1,9 +1,10 @@
-﻿#include "EnginePCH.h"
+#include "EnginePCH.h"
 #include "SkeletalMeshComponent.h"
 #include "Render/SkeletalMesh.h"
 #include "Render/SkeletalMeshData.h"
 #include "Asset/AssetManager.h"
 #include "Render/RenderCommand.h"
+#include "Collision/Ray.h"
 #include "Engine/PrimitiveSceneProxy.h"
 
 USkeletalMeshComponent::USkeletalMeshComponent()
@@ -74,6 +75,55 @@ void USkeletalMeshComponent::SetSkeletalMesh(USkeletalMesh* InSkeletalMesh)
 FBox USkeletalMeshComponent::CalcLocalBounds() const
 {
 	return SkeletalMesh ? SkeletalMesh->GetBounds() : Super::CalcLocalBounds();
+}
+
+bool USkeletalMeshComponent::LineTraceComponentLocal(const FRay& LocalRay, float& OutT)
+{
+	if (!SkeletalMesh)
+		return false;
+
+	const FSkeletalMeshData& MeshData = SkeletalMesh->GetMeshData();
+	const uint32 IndexCount = static_cast<uint32>(MeshData.Indices.Num());
+	if (IndexCount == 0)
+		return false;
+
+	// CPU 스키닝된 정점이 준비되어 있는 경우 현재 포즈 정점으로 검사
+	if (DeformedVertices.Num() == MeshData.Vertices.Num() && !DeformedVertices.IsEmpty())
+	{
+		bool bHit = false;
+		float NearestT = OutT;
+		const uint32 VertexCount = static_cast<uint32>(DeformedVertices.Num());
+
+		for (uint32 i = 0; i + 2 < IndexCount; i += 3)
+		{
+			const uint32 I0 = MeshData.Indices[i];
+			const uint32 I1 = MeshData.Indices[i + 1];
+			const uint32 I2 = MeshData.Indices[i + 2];
+			if (I0 >= VertexCount || I1 >= VertexCount || I2 >= VertexCount)
+				continue;
+
+			const FVector& V0 = DeformedVertices[I0].Position;
+			const FVector& V1 = DeformedVertices[I1].Position;
+			const FVector& V2 = DeformedVertices[I2].Position;
+
+			float T = FLT_MAX;
+			if (RayIntersectsTriangle(LocalRay, V0, V1, V2, T) && T < NearestT)
+			{
+				NearestT = T;
+				bHit = true;
+			}
+		}
+
+		if (bHit)
+		{
+			OutT = NearestT;
+			return true;
+		}
+		return false;
+	}
+
+	// 기본 바인드 포즈 메쉬로 검사
+	return RayIntersectsMesh(LocalRay, MeshData, OutT);
 }
 
 int32 USkeletalMeshComponent::GetNumMaterials() const

@@ -2,6 +2,7 @@
 #include "StaticMeshComponent.h"
 #include "Asset/AssetManager.h"
 #include "Render/RenderCommand.h"
+#include "Collision/Ray.h"
 
 #include "Engine/PrimitiveSceneProxy.h"
 
@@ -38,6 +39,14 @@ void UStaticMeshComponent::SetStaticMesh(UStaticMesh* InStaticMesh)
 	ClearOverrideMaterials();
 	MarkRenderStateDirty();
 	OnTransformDirty();
+}
+
+bool UStaticMeshComponent::LineTraceComponentLocal(const FRay& LocalRay, float& OutT)
+{
+	if (!StaticMesh)
+		return false;
+
+	return RayIntersectsMesh(LocalRay, StaticMesh->GetMeshData(), OutT);
 }
 
 int32 UStaticMeshComponent::GetNumMaterials() const

@@ -72,8 +72,22 @@ void UPrimitiveComponent::SubmitToRenderQueue(FRenderQueue& RenderQueue)
 
 bool UPrimitiveComponent::LineTraceComponent(const FRay& WorldRay, FHitResult& OutHit)
 {
-	const FStaticMeshData* Mesh = GetMeshData();
-	return Mesh && TraceMesh(WorldRay, *Mesh, GetWorldMatrix(), OutHit);
+	const FMatrix WorldToLocal = GetWorldMatrix().Inverse();
+	const FRay LocalRay{
+		.Origin = WorldToLocal.TransformPosition(WorldRay.Origin),
+		.Direction = WorldToLocal.TransformVector(WorldRay.Direction)
+	};
+
+	float T = FLT_MAX;
+	if (!LineTraceComponentLocal(LocalRay, T))
+	{
+		return false;
+	}
+
+	OutHit.HitComponent = this;
+	OutHit.Distance = T;
+	OutHit.ImpactPoint = WorldRay.Origin + WorldRay.Direction * T;
+	return true;
 }
 
 void UPrimitiveComponent::MarkRenderStateDirty()

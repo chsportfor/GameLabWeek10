@@ -1,9 +1,10 @@
-﻿#include "EnginePCH.h"
+#include "EnginePCH.h"
 #include "Ray.h"
 
 #include <algorithm>
 #include "Math/EngineMath.h"
 #include "Render/StaticMeshData.h"
+#include "Render/SkeletalMeshData.h"
 
 
 FRay ToLocalRay(const FRay& WorldRay, const FMatrix& WorldMatrix)
@@ -175,6 +176,46 @@ bool RayIntersectsMesh(const FRay& LocalRay, const FStaticMeshData& Mesh, float&
     }
 
     if (bHit) InOutNearestT = NearestT;
+    return bHit;
+}
+
+bool RayIntersectsMesh(const FRay& LocalRay, const FSkeletalMeshData& Mesh, float& InOutNearestT)
+{
+    FBox Box = Mesh.AABB;
+    float BoxT{};
+
+    if (!RayIntersectsAABB(LocalRay, Box.Min, Box.Max, BoxT) || BoxT >= InOutNearestT)
+        return false;
+
+    bool bHit = false;
+    float NearestT = InOutNearestT;
+
+    const uint32 IndexCount = static_cast<uint32>(Mesh.Indices.Num());
+    const uint32 VertexCount = static_cast<uint32>(Mesh.Vertices.Num());
+    for (uint32 i = 0; i + 2 < IndexCount; i += 3)
+    {
+        const uint32 I0 = Mesh.Indices[i];
+        const uint32 I1 = Mesh.Indices[i + 1];
+        const uint32 I2 = Mesh.Indices[i + 2];
+        if (I0 >= VertexCount || I1 >= VertexCount || I2 >= VertexCount)
+            continue;
+
+        const FVector& V0 = Mesh.Vertices[I0].Position;
+        const FVector& V1 = Mesh.Vertices[I1].Position;
+        const FVector& V2 = Mesh.Vertices[I2].Position;
+
+        float T = FLT_MAX;
+        if (RayIntersectsTriangle(LocalRay, V0, V1, V2, T) && T < NearestT)
+        {
+            NearestT = T;
+            bHit = true;
+        }
+    }
+
+    if (bHit)
+    {
+        InOutNearestT = NearestT;
+    }
     return bHit;
 }
 

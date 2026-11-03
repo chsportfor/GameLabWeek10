@@ -33,6 +33,7 @@ public:
 	void SubmitToRenderQueue(FRenderQueue& Queue, uint32 LODIndex);
 
 	virtual FBox CalcLocalBounds() const override;
+	virtual bool LineTraceComponentLocal(const FRay& LocalRay, float& OutT) override;
 
 	void ResetPoseToBindPose();
 	void UpdateSkinningMatrices();
