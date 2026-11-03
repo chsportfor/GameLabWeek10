@@ -359,6 +359,24 @@ UTexture2D* UAssetManager::LoadTexture(const FString& InPath, bool GenerateMips)
 		return Cast<UTexture2D>(*Found);
 	}
 
+	const FString GenericPath = fs::path(InPath).lexically_normal().generic_string();
+	if (GenericPath != InPath) {
+		if (URenderAsset** Found{ AssetMap.Find(GenericPath) }) {
+			return Cast<UTexture2D>(*Found);
+		}
+	}
+
+	const FString TargetFileName = fs::path(InPath).filename().generic_string();
+	if (!TargetFileName.empty()) {
+		for (const auto& [Key, Asset] : AssetMap) {
+			if (Asset && Asset->IsA<UTexture2D>()) {
+				if (fs::path(Key).filename().generic_string() == TargetFileName) {
+					return Cast<UTexture2D>(Asset);
+				}
+			}
+		}
+	}
+
 	TUniquePtr<FTexture2D> Resource{};
 	if (GetAssetExtension(InPath) == ".dds") {
 		Resource = RenderCommand::LoadDDSTexture(InPath);

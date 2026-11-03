@@ -79,6 +79,6 @@ private:
 	fbxsdk::FbxScene* LoadFbxScene(const FString& FilePath, EFbxImportFlags Flags);
 	void PreprocessScene(fbxsdk::FbxScene* Scene);
 	bool ProcessSkeleton(fbxsdk::FbxScene* Scene, FSkeletalMeshData& OutMesh);
-	bool ProcessGeometry(fbxsdk::FbxScene* Scene, FSkeletalMeshData& OutMesh);
-	bool ProcessStaticGeometry(fbxsdk::FbxScene* Scene, FStaticMeshData& OutMesh);
+	bool ProcessGeometry(fbxsdk::FbxScene* Scene, FSkeletalMeshData& OutMesh, const FString& FilePath = "");
+	bool ProcessStaticGeometry(fbxsdk::FbxScene* Scene, FStaticMeshData& OutMesh, const FString& FilePath = "");
 };

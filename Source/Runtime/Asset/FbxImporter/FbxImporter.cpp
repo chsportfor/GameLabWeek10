@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <filesystem>
 #include <fbxsdk.h>
 
 namespace
@@ -149,7 +150,99 @@ namespace
 		return -1;
 	}
 
-	FString GetTexturePath(FbxSurfaceMaterial* Material, const char* PropertyName)
+	FString ResolveTexturePath(const FString& FbxFilePath, const FString& RawPath)
+	{
+		if (RawPath.empty())
+		{
+			return "";
+		}
+
+		namespace fs = std::filesystem;
+		std::error_code Ec;
+
+		// 1. RawPath가 그대로 존재하는 경우
+		if (fs::exists(RawPath, Ec))
+		{
+			return fs::path(RawPath).lexically_normal().generic_string();
+		}
+
+		fs::path FbxDir = fs::path(FbxFilePath).parent_path();
+		fs::path Raw(RawPath);
+
+		// 2. FBX 파일 디렉터리 기준 상대 경로
+		if (!FbxDir.empty())
+		{
+			fs::path Candidate = (FbxDir / Raw).lexically_normal();
+			if (fs::exists(Candidate, Ec))
+			{
+				return Candidate.generic_string();
+			}
+		}
+
+		// 3. 파일명만 추출하여 인접 디렉터리 탐색 (타 PC 절대 경로, 서브폴더 구조 대응)
+		fs::path FileName = Raw.filename();
+		if (FileName.empty())
+		{
+			return RawPath;
+		}
+
+		fs::path ParentDir = FbxDir.parent_path();
+
+		const fs::path CandidateDirs[] = {
+			FbxDir,
+			FbxDir / "textures",
+			FbxDir / "Textures",
+			ParentDir,
+			ParentDir / "textures",
+			ParentDir / "Textures"
+		};
+
+		for (const auto& Dir : CandidateDirs)
+		{
+			if (Dir.empty() || !fs::exists(Dir, Ec))
+			{
+				continue;
+			}
+			fs::path CheckPath = (Dir / FileName).lexically_normal();
+			if (fs::exists(CheckPath, Ec))
+			{
+				return CheckPath.generic_string();
+			}
+		}
+
+		// 4. 모델 폴더(ParentDir) 및 FbxDir 하위를 재귀 검색
+		const fs::path SearchRoots[] = { ParentDir, FbxDir };
+		for (const auto& Root : SearchRoots)
+		{
+			if (Root.empty() || !fs::exists(Root, Ec))
+			{
+				continue;
+			}
+			for (const auto& Entry : fs::recursive_directory_iterator(Root, fs::directory_options::skip_permission_denied, Ec))
+			{
+				if (Entry.is_regular_file(Ec))
+				{
+					if (Entry.path().filename() == FileName)
+					{
+						return Entry.path().lexically_normal().generic_string();
+					}
+					if (Entry.path().stem() == FileName.stem())
+					{
+						std::string Ext = Entry.path().extension().string();
+						for (char& c : Ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+						if (Ext == ".png" || Ext == ".dds" || Ext == ".jpg" || Ext == ".jpeg" || Ext == ".tga")
+						{
+							return Entry.path().lexically_normal().generic_string();
+						}
+					}
+				}
+			}
+		}
+
+		return RawPath;
+	}
+
+	FString GetTexturePath(FbxSurfaceMaterial* Material, const char* PropertyName, const FString& FbxFilePath = "")
 	{
 		if (!Material) return "";
 		FbxProperty Property = Material->FindProperty(PropertyName);
@@ -161,7 +254,15 @@ namespace
 			FbxFileTexture* Texture = Property.GetSrcObject<FbxFileTexture>(0);
 			if (Texture)
 			{
-				return Texture->GetRelativeFileName();
+				FString FilePathStr = Texture->GetRelativeFileName();
+				if (FilePathStr.empty())
+				{
+					FilePathStr = Texture->GetFileName();
+				}
+				if (!FilePathStr.empty())
+				{
+					return ResolveTexturePath(FbxFilePath, FilePathStr);
+				}
 			}
 		}
 		return "";
@@ -396,9 +497,10 @@ bool FFbxImporter::LoadAndPrintFbxScene(const FString& FilePath, EFbxImportFlags
 	}
 
 	int32 AnimStackCount = Scene->GetSrcObjectCount<FbxAnimStack>();
+	FbxString UnitStr = GlobalSettings.GetSystemUnit().GetScaleFactorAsString();
 
-	HTR_LOG(Info, "[FBX Info] '{}' | UpVector: {} | Meshes: {} | RootBones: {} | AnimStacks: {}",
-		FilePath, UpVectorStr, MeshNodes.Num(), RootBones.Num(), AnimStackCount);
+	HTR_LOG(Info, "[FBX Info] '{}' | UpVector: {} | Unit: {} (Scale: {:.2f}cm) | Meshes: {} | RootBones: {} | AnimStacks: {}",
+		FilePath, UpVectorStr, UnitStr.Buffer(), GlobalSettings.GetSystemUnit().GetScaleFactor(), MeshNodes.Num(), RootBones.Num(), AnimStackCount);
 
 	Scene->Destroy();
 	return true;
@@ -481,9 +583,9 @@ void FFbxImporter::PreprocessScene(fbxsdk::FbxScene* Scene)
 	if (!Scene || !SdkManager) return;
 
 	FbxSystemUnit SceneUnit = Scene->GetGlobalSettings().GetSystemUnit();
-	if (SceneUnit != FbxSystemUnit::cm)
+	if (SceneUnit != FbxSystemUnit::m)
 	{
-		FbxSystemUnit::cm.ConvertScene(Scene);
+		FbxSystemUnit::m.ConvertScene(Scene);
 	}
 
 	FbxGeometryConverter Converter(SdkManager);
@@ -496,7 +598,7 @@ bool FFbxImporter::ImportStaticMesh(const FString& FilePath, FStaticMeshData& Ou
 	if (!Scene) return false;
 
 	PreprocessScene(Scene);
-	if (!ProcessStaticGeometry(Scene, OutMeshData))
+	if (!ProcessStaticGeometry(Scene, OutMeshData, FilePath))
 	{
 		Scene->Destroy();
 		return false;
@@ -518,7 +620,7 @@ bool FFbxImporter::ImportSkeletalMesh(const FString& FilePath, FSkeletalMeshData
 		return false;
 	}
 
-	if (!ProcessGeometry(Scene, OutMeshData))
+	if (!ProcessGeometry(Scene, OutMeshData, FilePath))
 	{
 		Scene->Destroy();
 		return false;
@@ -528,7 +630,7 @@ bool FFbxImporter::ImportSkeletalMesh(const FString& FilePath, FSkeletalMeshData
 	return true;
 }
 
-bool FFbxImporter::ProcessStaticGeometry(fbxsdk::FbxScene* Scene, FStaticMeshData& OutMesh)
+bool FFbxImporter::ProcessStaticGeometry(fbxsdk::FbxScene* Scene, FStaticMeshData& OutMesh, const FString& FilePath)
 {
 	if (!Scene) return false;
 
@@ -571,11 +673,11 @@ bool FFbxImporter::ProcessStaticGeometry(fbxsdk::FbxScene* Scene, FStaticMeshDat
 				FbxSurfaceMaterial* Mat = MeshNode->GetMaterial(m);
 				FStaticMaterialSlot Slot;
 				Slot.Name = Mat ? Mat->GetName() : "DefaultMaterial";
-				Slot.DiffuseTexturePath = GetTexturePath(Mat, FbxSurfaceMaterial::sDiffuse);
-				Slot.NormalTexturePath = GetTexturePath(Mat, FbxSurfaceMaterial::sNormalMap);
+				Slot.DiffuseTexturePath = GetTexturePath(Mat, FbxSurfaceMaterial::sDiffuse, FilePath);
+				Slot.NormalTexturePath = GetTexturePath(Mat, FbxSurfaceMaterial::sNormalMap, FilePath);
 				if (Slot.NormalTexturePath.empty())
 				{
-					Slot.NormalTexturePath = GetTexturePath(Mat, FbxSurfaceMaterial::sBump);
+					Slot.NormalTexturePath = GetTexturePath(Mat, FbxSurfaceMaterial::sBump, FilePath);
 				}
 				OutMesh.MaterialSlots.Add(Slot);
 			}
@@ -599,6 +701,8 @@ bool FFbxImporter::ProcessStaticGeometry(fbxsdk::FbxScene* Scene, FStaticMeshDat
 		{
 			UVSetName = Mesh->GetElementUV(0)->GetName();
 		}
+
+		FbxAMatrix MeshGlobalTransform = MeshNode->EvaluateGlobalTransform();
 
 		for (int32 p = 0; p < PolygonCount; ++p)
 		{
@@ -627,7 +731,8 @@ bool FFbxImporter::ProcessStaticGeometry(fbxsdk::FbxScene* Scene, FStaticMeshDat
 				int32 CpIndex = Mesh->GetPolygonVertex(p, Corner);
 
 				FVertex Vertex;
-				FVector Pos = ToEnginePosition(ControlPoints[CpIndex], UpVector, UpSign);
+				FbxVector4 WorldPos = MeshGlobalTransform.MultT(ControlPoints[CpIndex]);
+				FVector Pos = ToEnginePosition(WorldPos, UpVector, UpSign);
 				Vertex.Position = Pos;
 
 				OutMesh.AABB.Expand(FBox{ Pos, Pos });
@@ -635,7 +740,8 @@ bool FFbxImporter::ProcessStaticGeometry(fbxsdk::FbxScene* Scene, FStaticMeshDat
 				FbxVector4 FbxNormal;
 				if (Mesh->GetPolygonVertexNormal(p, Corner, FbxNormal))
 				{
-					Vertex.Normal = ToEngineDirection(FbxNormal, UpVector, UpSign);
+					FbxVector4 WorldNormal = MeshGlobalTransform.MultT(FbxNormal) - MeshGlobalTransform.MultT(FbxVector4(0.0, 0.0, 0.0, 1.0));
+					Vertex.Normal = ToEngineDirection(WorldNormal, UpVector, UpSign);
 				}
 				else
 				{
@@ -694,7 +800,7 @@ bool FFbxImporter::ProcessStaticGeometry(fbxsdk::FbxScene* Scene, FStaticMeshDat
 	return true;
 }
 
-bool FFbxImporter::ProcessGeometry(fbxsdk::FbxScene* Scene, FSkeletalMeshData& OutMesh)
+bool FFbxImporter::ProcessGeometry(fbxsdk::FbxScene* Scene, FSkeletalMeshData& OutMesh, const FString& FilePath)
 {
 	if (!Scene) return false;
 
@@ -788,11 +894,11 @@ bool FFbxImporter::ProcessGeometry(fbxsdk::FbxScene* Scene, FSkeletalMeshData& O
 				FbxSurfaceMaterial* Mat = MeshNode->GetMaterial(m);
 				FSkeletalMaterialSlot Slot;
 				Slot.Name = Mat ? Mat->GetName() : "DefaultMaterial";
-				Slot.DiffuseTexturePath = GetTexturePath(Mat, FbxSurfaceMaterial::sDiffuse);
-				Slot.NormalTexturePath = GetTexturePath(Mat, FbxSurfaceMaterial::sNormalMap);
+				Slot.DiffuseTexturePath = GetTexturePath(Mat, FbxSurfaceMaterial::sDiffuse, FilePath);
+				Slot.NormalTexturePath = GetTexturePath(Mat, FbxSurfaceMaterial::sNormalMap, FilePath);
 				if (Slot.NormalTexturePath.empty())
 				{
-					Slot.NormalTexturePath = GetTexturePath(Mat, FbxSurfaceMaterial::sBump);
+					Slot.NormalTexturePath = GetTexturePath(Mat, FbxSurfaceMaterial::sBump, FilePath);
 				}
 				OutMesh.MaterialSlots.Add(Slot);
 			}
