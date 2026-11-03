@@ -14,6 +14,9 @@ class USkinnedMeshComponent : public UMeshComponent
 public:
 	USkeletalMesh* GetSkeletalMesh() const { return SkeletalMesh; }
 	void SetSkeletalMesh(USkeletalMesh* InSkeletalMesh);
+	// 부모 본 기준의 현재 자세. 원본 RefPoseTransform은 수정하지 않는다.
+	const FTransform* GetBoneLocalTransform(int32 BoneIndex) const;
+	bool SetBoneLocalTransform(int32 BoneIndex, const FTransform& InTransform);
 	int32 GetNumMaterials() const override;
 	void UpdateSkinning();
 	FString GetMaterialSlotName(int32 SlotIndex) const override;
@@ -21,9 +24,17 @@ public:
 	FVertexBuffer* GetSkinnedVertexBuffer() const{return SkinnedVertexBuffer.get();}
 
 	// 부모 Proxy가 월드 Bounds를 계산할 때 스켈레탈 메시의 로컬 Bounds를 사용한다.
-	FBox CalcLocalBounds() const override { return SkeletalMesh ? SkeletalMesh->GetRenderBounds() : Super::CalcLocalBounds(); }
+	FBox CalcLocalBounds() const override
+	{
+		if (bHasSkinnedBounds) return SkinnedBounds;
+		return SkeletalMesh ? SkeletalMesh->GetRenderBounds() : Super::CalcLocalBounds();
+	}
 	
 private:
 	USkeletalMesh* SkeletalMesh = nullptr;
+	TArray<FTransform> CurrentLocalTransforms;
+	TArray<FMatrix> CurrentGlobalMatrices;
 	TUniquePtr<FVertexBuffer> SkinnedVertexBuffer;
+	FBox SkinnedBounds;
+	bool bHasSkinnedBounds = false;
 };
