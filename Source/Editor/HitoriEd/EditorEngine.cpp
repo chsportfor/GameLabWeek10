@@ -33,6 +33,7 @@
 #include "Sequence/SequenceActor.h"
 #include "Editor/HitoriEd/EditorFileUtils.h"
 #include "Editor/HitoriEd/EditorResourcePaths.h"
+#include "Editor/SkeletalMeshViewer/SkeletalMeshViewerPanel.h"
 #include "Core/ResourcePaths.h"
 #include "UObject/UObjectIterator.h"
 
@@ -220,6 +221,21 @@ bool UEditorEngine::Init()
 	OutlineRenderer->Init(Renderer);
 
 	SettingsPanel = EditorUI->AddEditorPanel<FSettingsPanel>();
+
+	SkeletalMeshViewerPanel = EditorUI->AddEditorPanel<FSkeletalMeshViewerPanel>();
+	SkeletalMeshViewerPanel->SetRenderer(Renderer);
+	SkeletalMeshViewerPanel->SetGridRenderer(GridRenderer.get());
+
+	if (DetailsPanel)
+	{
+		DetailsPanel->SetOpenSkeletalMeshViewerCallback([this](USkeletalMesh* Mesh)
+		{
+			if (SkeletalMeshViewerPanel)
+			{
+				SkeletalMeshViewerPanel->OpenMesh(Mesh);
+			}
+		});
+	}
 
 	//ToolbarPanel->SetPlayCallback([this]() { RequestPlaySession(); });
 	//ToolbarPanel->SetStopCallback([this]() { RequestEndPlayMap(); });
@@ -617,14 +633,25 @@ void UEditorEngine::UpdateMultipleViewportState(const float DeltaTime)
 		SettingsPanel->GetMutableSettings().MultipleViewportsVertical = Ratio.Vertical;
 	}
 
-	MultipleViewportsAdapter.UpdateInput(
-		DeltaTime,
-		LocalMousePosition,
-		SettingsPanel->GetSettings().CameraSpeed,
-		SettingsPanel->GetSettings().MouseSensitivity);
-	// 겹친 창은 Hover 선택에서 제외하고 우클릭 Capture를 우선한다.
-	if (ViewportsPanel->IsHovered() || MultipleViewportsAdapter.GetCapturedViewIndex() != InvalidViewIndex)
+	// [Viewport Input Isolation]
+	// 스켈레탈 메시 뷰어가 활성화되어 있거나 마우스와 상호작용 중일 때는 메인 레벨 뷰포트 입력을 완전히 차단한다.
+	const bool bSkelInteracting = (CurrentEditorMode == EEditorMode::SkeletalMeshViewer) ||
+		(SkeletalMeshViewerPanel && SkeletalMeshViewerPanel->IsOpen() && SkeletalMeshViewerPanel->IsHoveredOrInteracting());
+
+	const bool bViewportCanReceiveInput = !bSkelInteracting &&
+		(ViewportsPanel->IsHovered() || MultipleViewportsAdapter.GetCapturedViewIndex() != InvalidViewIndex);
+
+	if (bViewportCanReceiveInput)
+	{
+		MultipleViewportsAdapter.UpdateInput(
+			DeltaTime,
+			LocalMousePosition,
+			SettingsPanel->GetSettings().CameraSpeed,
+			SettingsPanel->GetSettings().MouseSensitivity);
+
+		// 겹친 창은 Hover 선택에서 제외하고 우클릭 Capture를 우선한다.
 		MultipleViewportsAdapter.SetEditorViewIndex(MultipleViewportsAdapter.GetActiveViewIndex());
+	}
 }
 
 // 월드를 한 번 Tick한 뒤 에디터와 피킹을 갱신한다.
@@ -659,6 +686,17 @@ void UEditorEngine::TickWorldAndEditor(const float DeltaTime)
 // 활성 World를 먼저 준비하고 그림자를 생성한 뒤 View별 카메라 수집·렌더를 수행한다.
 void UEditorEngine::RenderMultipleViewports()
 {
+	// 스켈레탈 메시 뷰어 모드일 때는 무거운 메인 씬 4분할 뷰포트(섀도우맵 패스 + 포그 + 톤맵 등)를
+	// 완전히 건너뛰어 CPU/GPU 드로우콜 병목을 제거하고 140+ FPS를 확보한다.
+	if (CurrentEditorMode == EEditorMode::SkeletalMeshViewer)
+	{
+		if (SkeletalMeshViewerPanel && SkeletalMeshViewerPanel->IsOpen())
+		{
+			SkeletalMeshViewerPanel->RenderPreview();
+		}
+		return;
+	}
+
 	// PIE 창 크기를 외부 View에 먼저 알려야 카메라 Override의 직교 폭 보정이 맞는다.
 	bPIEWindowRendered = false;
 	const bool bRenderPIEWindow = IsPIEInWindow() && UpdatePIEWindowTargets();
@@ -878,6 +916,11 @@ void UEditorEngine::RenderMultipleViewports()
 		MultipleViewportsAdapter.GetLayoutMode(),
 		MultipleViewportsAdapter.GetSingleViewIndex(),
 		CameraPresets);
+
+	if (SkeletalMeshViewerPanel && SkeletalMeshViewerPanel->IsOpen())
+	{
+		SkeletalMeshViewerPanel->RenderPreview();
+	}
 }
 
 void UEditorEngine::UpdatePIEViewCamera() {
@@ -1352,6 +1395,9 @@ void UEditorEngine::RenderDepthPass(const int32 ViewIndex, const FRenderingInfo&
 // 입력 View의 Ray와 피킹으로 Gizmo·공유 선택을 갱신한다.
 void UEditorEngine::UpdateGizmoAndPicking()
 {
+	if (CurrentEditorMode == EEditorMode::SkeletalMeshViewer)
+		return;
+
 	// Delete는 BeginFrame에서 한 번만 처리하고 여기서는 View 입력만 다룬다.
 	const int32 ViewIndex = MultipleViewportsAdapter.GetActiveViewIndex();
 	if (ViewIndex == InvalidViewIndex || !ViewportsPanel->IsHovered())
@@ -1907,4 +1953,22 @@ void UEditorEngine::RequestQuitGame(const UWorld* InWorld)
     // A game menu closes the PIE session, not the editor and its unsaved scene.
     if (InWorld && InWorld == PlayWorld)
         RequestEndPlayMap();
+}
+
+void UEditorEngine::SetEditorMode(EEditorMode InMode)
+{
+	CurrentEditorMode = InMode;
+	if (EditorUI && EditorUI->GetEditorMode() != InMode)
+	{
+		EditorUI->SetEditorMode(InMode);
+	}
+
+	if (CurrentEditorMode == EEditorMode::SkeletalMeshViewer)
+	{
+		if (SkeletalMeshViewerPanel)
+		{
+			SkeletalMeshViewerPanel->SetOpen(true);
+			SkeletalMeshViewerPanel->RequestFocus();
+		}
+	}
 }

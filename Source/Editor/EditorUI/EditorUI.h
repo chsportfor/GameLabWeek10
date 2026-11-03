@@ -6,6 +6,12 @@
 
 #include <functional>
 
+enum class EEditorMode
+{
+	LevelEditor,
+	SkeletalMeshViewer
+};
+
 class FEditorUI
 {
 public:
@@ -26,6 +32,10 @@ public:
 
 	FLevelEditorToolbar* GetToolbar() const { return Toolbar.get(); }
 
+	EEditorMode GetEditorMode() const { return CurrentMode; }
+	void SetEditorMode(EEditorMode InMode);
+	void SetEditorModeChangedCallback(std::function<void(EEditorMode)> InCallback) { OnEditorModeChanged = std::move(InCallback); }
+
 	void SetNewSceneCallback(std::function<void()> InCallback) { OnNewScene = InCallback; }
 	void SetOpenSceneCallback(std::function<void()> InCallback) { OnOpenScene = InCallback; }
 	void SetSaveSceneCallback(std::function<void()> InCallback) { OnSaveScene = InCallback; }
@@ -34,6 +44,10 @@ public:
 private:
 	bool bUseDockSpace = true;
 	bool bPassthruCentralNode = false;
+
+	EEditorMode CurrentMode = EEditorMode::LevelEditor;
+	bool bPendingTabSelect = false;
+	std::function<void(EEditorMode)> OnEditorModeChanged;
 
 	void DrawMainMenuBar();
 

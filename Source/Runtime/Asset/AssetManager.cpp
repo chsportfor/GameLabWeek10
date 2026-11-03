@@ -605,6 +605,16 @@ void UAssetManager::ForEachObjStaticMesh(const std::function<void(const FString&
 	}
 }
 
+void UAssetManager::ForEachSkeletalMesh(const std::function<void(const FString& Key, USkeletalMesh* Mesh)>& Func)
+{
+	for (auto& [Key, Asset] : Get().AssetMap)
+	{
+		if (!Asset || !Asset->IsA<USkeletalMesh>())
+			continue;
+		Func(Key, Cast<USkeletalMesh>(Asset));
+	}
+}
+
 FLODGenerateResult UAssetManager::GenerateStaticMeshLODs(UStaticMesh& Mesh, const FLODGenerateRequest& Request)
 {
 	TArray<FStaticMeshData> Generated;

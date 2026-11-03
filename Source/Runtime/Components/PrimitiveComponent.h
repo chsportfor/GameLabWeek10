@@ -8,6 +8,17 @@
 #include "Collision/HitResult.h"
 
 class FPrimitiveSceneProxy;
+class FVertexBuffer;
+class FIndexBuffer;
+
+struct FOutlineGeometry
+{
+	FVertexBuffer* VertexBuffer = nullptr;
+	FIndexBuffer* IndexBuffer = nullptr;
+	uint32 IndexCount = 0;
+
+	bool IsValid() const { return VertexBuffer != nullptr && IndexBuffer != nullptr && IndexCount > 0; }
+};
 
 enum class EPrimitiveType
 {
@@ -54,6 +65,7 @@ public:
 	// 메시가 없거나(텍스트) View에 따라 형상이 정해지는 컴포넌트(빌보드·파티클)는
 	// 컴포넌트 월드 행렬만으로 같은 그림을 못 만들므로 nullptr을 돌려준다.
 	virtual UStaticMesh* GetRenderMesh() const { return nullptr; }
+	virtual FOutlineGeometry GetOutlineGeometry() { return {}; }
 
 	virtual int32 GetNumMaterials() const { return 0; }
 	virtual UMaterial* GetMaterial(int32 SlotIndex) const { return nullptr; }

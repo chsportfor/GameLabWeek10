@@ -43,13 +43,13 @@ void FOutlineRenderer::OnRender(const FOutline& InOutline, const FMatrix& InView
 		return;
 	}
 
-	// 메시 없는 컴포넌트(텍스트 등)는 아웃라인을 그리지 않는다
-	if (!InOutline.GetMesh() || !InOutline.GetMesh()->IndexBuffer)
+	const FOutlineGeometry Geometry = InOutline.GetGeometry();
+	if (!Geometry.IsValid())
 	{
 		return;
 	}
 
-	RenderCommand::BindMesh(InOutline.GetMesh());
+	RenderCommand::BindGeometry(Geometry.VertexBuffer, Geometry.IndexBuffer);
 	RenderCommand::BindConstantBuffer(0, ConstantBuffer.get(), EShaderBindFlagBits::Vertex);
 
 	const FMatrix OriginalWorld = InOutline.GetWorldMatrix();
@@ -58,7 +58,7 @@ void FOutlineRenderer::OnRender(const FOutline& InOutline, const FMatrix& InView
     const FMatrix& ViewProj = InViewProj;
 	const float ViewportWidth = static_cast<float>(Viewport.Width);
 	const float ViewportHeight = static_cast<float>(Viewport.Height);
-	const uint32 IndexCount = InOutline.GetMesh()->IndexBuffer->GetIndexCount();
+	const uint32 IndexCount = Geometry.IndexCount;
 
 	// 1패스: 두께 0(확장 없음)으로 선택 메시 영역을 스텐실에 찍는다.
 	FOutlineData MaskConst = { World, NormalMatrix, ViewProj, FVector4(ViewportWidth, ViewportHeight, 0.0f, 0.0f) };

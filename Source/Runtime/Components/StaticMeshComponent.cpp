@@ -49,6 +49,18 @@ bool UStaticMeshComponent::LineTraceComponentLocal(const FRay& LocalRay, float& 
 	return RayIntersectsMesh(LocalRay, StaticMesh->GetMeshData(), OutT);
 }
 
+FOutlineGeometry UStaticMeshComponent::GetOutlineGeometry()
+{
+	if (!StaticMesh || !StaticMesh->IndexBuffer)
+		return {};
+
+	return FOutlineGeometry{
+		StaticMesh->GetVertexBuffer(0),
+		StaticMesh->GetIndexBuffer(0),
+		StaticMesh->IndexBuffer->GetIndexCount()
+	};
+}
+
 int32 UStaticMeshComponent::GetNumMaterials() const
 {
 	return StaticMesh ? static_cast<int32>(StaticMesh->GetMeshData().MaterialSlots.Num()) : 0;

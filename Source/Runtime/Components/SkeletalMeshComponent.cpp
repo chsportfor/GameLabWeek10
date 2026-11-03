@@ -25,8 +25,10 @@ void USkeletalMeshComponent::BeginPlay()
 void USkeletalMeshComponent::TickComponent(float DeltaTime)
 {
 	Super::TickComponent(DeltaTime);
-	UpdateSkinningMatrices();
-	bSkinningDirty = true;
+	if (bSkinningDirty)
+	{
+		UpdateSkinningMatrices();
+	}
 }
 
 const FSkeletalMeshData* USkeletalMeshComponent::GetSkeletalMeshData() const
@@ -124,6 +126,28 @@ bool USkeletalMeshComponent::LineTraceComponentLocal(const FRay& LocalRay, float
 
 	// 기본 바인드 포즈 메쉬로 검사
 	return RayIntersectsMesh(LocalRay, MeshData, OutT);
+}
+
+FOutlineGeometry USkeletalMeshComponent::GetOutlineGeometry()
+{
+	if (!SkeletalMesh || !SkeletalMesh->IndexBuffer)
+		return {};
+
+	if (bSkinningDirty)
+	{
+		DeformVerticesCPU();
+		bSkinningDirty = false;
+	}
+
+	FVertexBuffer* VB = DynamicVertexBuffer ? DynamicVertexBuffer.get() : SkeletalMesh->VertexBuffer.get();
+	if (!VB)
+		return {};
+
+	return FOutlineGeometry{
+		VB,
+		SkeletalMesh->IndexBuffer.get(),
+		SkeletalMesh->IndexBuffer->GetIndexCount()
+	};
 }
 
 int32 USkeletalMeshComponent::GetNumMaterials() const
@@ -265,6 +289,8 @@ void USkeletalMeshComponent::SubmitToRenderQueue(FRenderQueue& RenderQueue, uint
 	if (!DynamicVertexBuffer || !SkeletalMesh->IndexBuffer)
 		return;
 
+	CachedWorldMatrix = GetWorldMatrix();
+
 	const FSkeletalMeshData& Data = SkeletalMesh->GetMeshData();
 	for (const FSkelMeshSection& Section : Data.Sections)
 	{
@@ -274,6 +300,7 @@ void USkeletalMeshComponent::SubmitToRenderQueue(FRenderQueue& RenderQueue, uint
 
 		FRenderPacket& Packet = RenderQueue.AddDefaulted_GetRef();
 		Packet.Proxy = GetSceneProxy();
+		Packet.Model = &CachedWorldMatrix;
 		Packet.CustomVertexBuffer = DynamicVertexBuffer.get();
 		Packet.CustomIndexBuffer = SkeletalMesh->IndexBuffer.get();
 		Packet.Material = Material;

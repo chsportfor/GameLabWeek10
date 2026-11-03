@@ -66,6 +66,9 @@ public:
 	void DeleteComponent(UActorComponent* Component);
 	void MakeRootComponent(USceneComponent* NewRoot);
 
+	EEditorMode GetEditorMode() const { return CurrentEditorMode; }
+	void SetEditorMode(EEditorMode InMode);
+
 	//Play 버튼을 눌렀을때 Play Session 실행을 요청한다.
 	inline void RequestPlaySession() { bPlaySessionRequested = true; }
 	inline void RequestEndPlayMap() { bRequestEndPlayMapQueued = true; bIsPaused = false; }
@@ -178,6 +181,8 @@ private:
 	FRenderQueue ArrowQueue;
 	FOutlinerPanel* OutlinerPanel = nullptr;
 	FContentDrawerPanel* ContentDrawerPanel = nullptr;
+	class FSkeletalMeshViewerPanel* SkeletalMeshViewerPanel = nullptr;
+	EEditorMode CurrentEditorMode = EEditorMode::LevelEditor;
 
 	UWorld* EditorWorld = nullptr;
 	UWorld* PlayWorld = nullptr;

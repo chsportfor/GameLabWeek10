@@ -99,10 +99,10 @@ void FEditorUI::OnRender()
 
 	for (auto& Panel : Panels)
 	{
-		if (Panel->IsOpen())
-		{
-			Panel->OnRender();
-		}
+		if (!Panel->IsOpen())
+			continue;
+
+		Panel->OnRender();
 	}
 }
 
@@ -144,4 +144,17 @@ void FEditorUI::DrawMainMenuBar()
 		ImGui::EndMainMenuBar();
 	}
 	ImGui::PopStyleVar(2);
+}
+
+void FEditorUI::SetEditorMode(EEditorMode InMode)
+{
+	if (CurrentMode != InMode)
+	{
+		CurrentMode = InMode;
+		bPendingTabSelect = true;
+		if (OnEditorModeChanged)
+		{
+			OnEditorModeChanged(CurrentMode);
+		}
+	}
 }

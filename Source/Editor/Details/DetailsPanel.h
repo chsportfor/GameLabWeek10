@@ -9,10 +9,12 @@
 struct FTransform;
 class FRenderer;
 class ULightComponent;
+class USkeletalMesh;
 
 using DetailsSelectionCallback = std::function<void(UActorComponent*)>;
 using DetailsDeleteComponentCallback = std::function<void(UActorComponent*)>;
 using DetailsMakeRootCallback = std::function<void(USceneComponent*)>;
+using DetailsOpenSkeletalMeshViewerCallback = std::function<void(USkeletalMesh*)>;
 
 class FDetailsPanel : public IEditorPanel
 {
@@ -39,6 +41,7 @@ public:
 	void SetSelectionCallback(DetailsSelectionCallback InCallback) { Callback = InCallback; }
 	void SetDeleteComponentCallback(DetailsDeleteComponentCallback InCallback) { DeleteCallback = InCallback; }
 	void SetMakeRootCallback(DetailsMakeRootCallback InCallback) { MakeRootCallback = InCallback; }
+	void SetOpenSkeletalMeshViewerCallback(DetailsOpenSkeletalMeshViewerCallback InCallback) { OpenSkelViewerCallback = std::move(InCallback); }
 
 	void SetWorld(UWorld* InWorld) { World = InWorld; }
 	// Renderer를 소유하지 않으며, 미리보기 조회에만 사용한다.
@@ -84,5 +87,7 @@ private:
 	// 실제 표시 상태는 Client에만 저장한다.
 	std::function<bool(uint32)> ShadowCascadeDebugGetter;
 	std::function<void(uint32, bool)> ShadowCascadeDebugSetter;
+
+	DetailsOpenSkeletalMeshViewerCallback OpenSkelViewerCallback;
 };
 

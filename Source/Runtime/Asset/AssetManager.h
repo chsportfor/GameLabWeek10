@@ -72,6 +72,9 @@ public:
 	// 로드된 OBJ 스태틱 메시(키가 .obj로 끝나는 것)마다 부른다. 기본 도형·기즈모 메시는 제외된다.
 	static void ForEachObjStaticMesh(const std::function<void(const FString& Key, UStaticMesh& Mesh)>& Func);
 
+	// 로드된 스켈레탈 메시(USkeletalMesh)마다 부른다.
+	static void ForEachSkeletalMesh(const std::function<void(const FString& Key, USkeletalMesh* Mesh)>& Func);
+
 private:
 	TMap<FString, FString> AssetPathMap;
 	TMap<FString, URenderAsset*> AssetMap;

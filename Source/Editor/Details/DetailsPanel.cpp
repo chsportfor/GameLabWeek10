@@ -338,14 +338,18 @@ namespace
 		}
 	}
 
-	void DrawSkeletalMeshSlot(UObject* Owner, USkeletalMesh** SkeletalMeshPtr)
+	void DrawSkeletalMeshSlot(UObject* Owner, USkeletalMesh** SkeletalMeshPtr, const DetailsOpenSkeletalMeshViewerCallback& OnOpenViewer = nullptr)
 	{
 		USkeletalMesh* Current = *SkeletalMeshPtr;
 
 		FString CurrentPath = Current ? Current->GetPath() : "";
 		FString CurrentFileName = Current ? GetAssetDisplayName(CurrentPath) : "None";
 
-		ImGui::SetNextItemWidth(-1.0f);
+		const float ButtonWidth = Current ? 48.0f : 0.0f;
+		const float Spacing = ImGui::GetStyle().ItemSpacing.x;
+		const float ComboWidth = Current ? (ImGui::GetContentRegionAvail().x - ButtonWidth - Spacing) : -1.0f;
+
+		ImGui::SetNextItemWidth(ComboWidth);
 
 		bool bOpen = ImGui::BeginCombo("##SkeletalMesh", CurrentFileName.c_str());
 		if (ImGui::IsItemHovered() && Current)
@@ -397,6 +401,22 @@ namespace
 					ImGui::SetItemDefaultFocus();
 			}
 			ImGui::EndCombo();
+		}
+
+		if (Current)
+		{
+			ImGui::SameLine();
+			if (ImGui::Button("Edit", ImVec2(ButtonWidth, 0.0f)))
+			{
+				if (OnOpenViewer)
+				{
+					OnOpenViewer(Current);
+				}
+			}
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("Open in Skeletal Mesh Viewer");
+			}
 		}
 	}
 
@@ -815,7 +835,7 @@ namespace
 	}
 
 	// UClass에 등록된 프로퍼티를 타입에 맞는 위젯으로 그린다
-	void DrawProperty(UObject* Object, const FProperty& Property, ImFont* CustomFont)
+	void DrawProperty(UObject* Object, const FProperty& Property, ImFont* CustomFont, const DetailsOpenSkeletalMeshViewerCallback& OnOpenViewer = nullptr)
 	{
 		void* ValuePtr = reinterpret_cast<char*>(Object) + Property.Offset;
 		const FString Label = "##" + Property.Name;
@@ -957,7 +977,7 @@ namespace
 			}
 			else if (Property.Class == USkeletalMesh::StaticClass())
 			{
-				DrawSkeletalMeshSlot(Object, reinterpret_cast<USkeletalMesh**>(ObjPtr));
+				DrawSkeletalMeshSlot(Object, reinterpret_cast<USkeletalMesh**>(ObjPtr), OnOpenViewer);
 			}
 			break;
 		}
@@ -973,7 +993,7 @@ namespace
 	}
 
 	// 클래스 계층을 따라 올라가며 각 단계의 프로퍼티를 표시
-	void DrawProperties(UObject* Object, ImFont* CustomFont)
+	void DrawProperties(UObject* Object, ImFont* CustomFont, const DetailsOpenSkeletalMeshViewerCallback& OnOpenViewer = nullptr)
 	{
 		if (!Object)
 		{
@@ -1018,7 +1038,7 @@ namespace
 
 					const bool bReadOnly = Property.HasAnyFlags(CPF_EditConst);
 					if (bReadOnly) ImGui::BeginDisabled();
-					DrawProperty(Object, Property, CustomFont);
+					DrawProperty(Object, Property, CustomFont, OnOpenViewer);
 					if (bReadOnly) ImGui::EndDisabled();
 				}
 			}
@@ -1407,7 +1427,7 @@ void FDetailsPanel::OnRender()
 
 		// 액터 -> 컴포넌트 순으로, 클래스별 프로퍼티 표시
 		ImGui::PushID(TargetActor);
-		DrawProperties(TargetActor, CustomFont);
+		DrawProperties(TargetActor, CustomFont, OpenSkelViewerCallback);
 		if (const APlayerCameraManager* CameraManager{ Cast<APlayerCameraManager>(TargetActor) }) {
 			DrawPlayerCameraManagerDetails(*CameraManager);
 		}
@@ -1417,7 +1437,7 @@ void FDetailsPanel::OnRender()
 		{
 			ImGui::PushID(TargetComponent);
 			ImGui::SeparatorText("Component Properties");
-			DrawProperties(TargetComponent, CustomFont);
+			DrawProperties(TargetComponent, CustomFont, OpenSkelViewerCallback);
 
 			if (UScriptComponent* ScriptComponent = Cast<UScriptComponent>(TargetComponent))
 			{

@@ -34,9 +34,11 @@ public:
 
 	virtual FBox CalcLocalBounds() const override;
 	virtual bool LineTraceComponentLocal(const FRay& LocalRay, float& OutT) override;
+	virtual FOutlineGeometry GetOutlineGeometry() override;
 
 	void ResetPoseToBindPose();
 	void UpdateSkinningMatrices();
+	void MarkSkinningDirty() { bSkinningDirty = true; }
 	const TArray<FTransform>& GetBoneTransforms() const { return BoneTransforms; }
 	const TArray<FMatrix>& GetSkinningMatrices() const { return SkinningMatrices; }
 
@@ -52,4 +54,6 @@ private:
 
 	TUniquePtr<FVertexBuffer> DynamicVertexBuffer;
 	void DeformVerticesCPU();
+
+	mutable FMatrix CachedWorldMatrix = FMatrix::Identity;
 };

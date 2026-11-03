@@ -23,6 +23,7 @@ public:
 	void SetStaticMesh(UStaticMesh* InStaticMesh);
 	UStaticMesh* GetStaticMesh() const { return StaticMesh; }
 	virtual UStaticMesh* GetRenderMesh() const override { return StaticMesh; }
+	virtual FOutlineGeometry GetOutlineGeometry() override;
 
 	virtual int32 GetNumMaterials() const override;
 	virtual FString GetMaterialSlotName(int32 SlotIndex) const override;
