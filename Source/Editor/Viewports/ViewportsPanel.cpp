@@ -432,6 +432,10 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 			FStatRegistry::GetCounter(DecalStats::STAT_Total),
 			FStatRegistry::GetCounter(DecalStats::STAT_DrawCalls),
 			FStatRegistry::GetCounter(DecalStats::STAT_AdditiveDrawCalls)), ValueColor });
+		Lines.Add({ std::format("  Projected Build: {:.3f} ms  Builds: {}  Vertices: {}",
+			FStatRegistry::GetCurrentFrameMs(DecalStats::STAT_ProjectedBuildCPU),
+			FStatRegistry::GetCounter(DecalStats::STAT_ProjectedBuilds),
+			FStatRegistry::GetCounter(DecalStats::STAT_ProjectedVertices)), ValueColor });
 	}
 
 	// 현재 프레임 전체 World의 그림자 통계를 기존 줄 목록에 추가한다.

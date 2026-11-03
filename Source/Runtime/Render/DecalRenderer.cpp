@@ -6,6 +6,7 @@
 #include "Renderer.h"
 #include "Asset/AssetManager.h"
 #include "Core/Stats/DecalStats.h"
+#include "Render/DecalSettings.h"
 
 
 bool FDecalRenderer::Init(FRenderer* InRenderer)
@@ -29,6 +30,21 @@ bool FDecalRenderer::Init(FRenderer* InRenderer)
 
 	AdditivePipelineState = PipelineState;
 	AdditivePipelineState.BlendState = EBlendState::Additive;
+
+	ProjectedShader = FRenderResourceManager::GetShaderProgram("Resources/Shader/ProjectedDecalShader.hlsl");
+	if (!ProjectedShader)
+	{
+		return false;
+	}
+
+	// 투영 메시는 표면 바깥을 향해 감겨 있어 앞면만 그린다.
+	// 깊이 비교는 셰이더에서 하므로 DBuffer와 크기가 다를 수 있는 DSV를 묶지 않는다.
+	ProjectedPipelineState = PipelineState;
+	ProjectedPipelineState.Shader = ProjectedShader;
+	ProjectedPipelineState.RasterizerState = ERasterizerState::SolidBack;
+
+	ProjectedAdditivePipelineState = ProjectedPipelineState;
+	ProjectedAdditivePipelineState.BlendState = EBlendState::Additive;
 
 	return true;
 }
@@ -73,11 +89,20 @@ void FDecalRenderer::DrawDecals(
 	const FVector& CameraPosition,
 	const FMatrix& Projection,
 	int32 ViewWidth,
-	bool bAdditive)
+	bool bAdditive,
+	EDecalMode Mode)
 {
+	const bool bProjected = Mode == EDecalMode::Projected;
+
 	for (FDecalSceneProxy* DecalSceneProxy : SortDecals)
 	{
 		if (DecalSceneProxy->IsAdditive() != bAdditive)
+		{
+			continue;
+		}
+
+		// 닿는 표면이 없어 만든 정점이 없으면 그릴 것이 없다.
+		if (bProjected && DecalSceneProxy->GetProjectedVertexCount() == 0)
 		{
 			continue;
 		}
@@ -89,7 +114,8 @@ void FDecalRenderer::DrawDecals(
 		}
 
 
-		DecalConstants.DecalToClip = DecalSceneProxy->GetDecalToWorld() * ViewProjection;
+		// 투영 메시 정점은 이미 월드 좌표다.
+		DecalConstants.DecalToClip = bProjected ? ViewProjection : DecalSceneProxy->GetDecalToWorld() * ViewProjection;
 		DecalConstants.DecalInfo.WorldToDecal = DecalSceneProxy->GetWorldToDecal();
 		DecalConstants.DecalInfo.DecalColor = DecalSceneProxy->GetDecalColor();
 		DecalConstants.DecalInfo.DecalColor.A *= DecalSceneProxy->GetFadeAlpha() * ScreenAlpha;
@@ -98,9 +124,53 @@ void FDecalRenderer::DrawDecals(
 		RenderCommand::BindShaderResource(1, DecalSceneProxy->GetDecalTexture(), EShaderBindFlagBits::Pixel);
 		RenderCommand::UpdateBufferData(ConstantBuffer.get(), &DecalConstants);
 		RenderCommand::BindConstantBuffer(0, ConstantBuffer.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-		RenderCommand::DrawIndexed(36);
+		if (bProjected)
+		{
+			RenderCommand::BindVertexBuffer(DecalSceneProxy->GetProjectedVertexBuffer());
+			RenderCommand::Draw(DecalSceneProxy->GetProjectedVertexCount());
+		}
+		else
+		{
+			RenderCommand::DrawIndexed(36);
+		}
 		FStatRegistry::AddCounter(bAdditive ? DecalStats::STAT_AdditiveDrawCalls : DecalStats::STAT_DrawCalls);
 	}
+}
+
+void FDecalRenderer::DrawScreenSpace(
+	const TArray<FDecalSceneProxy*>& SortDecals,
+	FDecalConstants& DecalConstants,
+	FTexture2D* DepthTexture,
+	const FMatrix& ViewProjection,
+	const FVector& CameraPosition,
+	const FMatrix& Projection,
+	const FViewportSettings& Viewport,
+	bool bAdditive)
+{
+	RenderCommand::BindPipelineState(bAdditive ? AdditivePipelineState : PipelineState);
+	RenderCommand::BindSamplerState(0, ESamplerState::LinearClamp, EShaderBindFlagBits::Pixel);
+	RenderCommand::BindShaderResource(0, DepthTexture, EShaderBindFlagBits::Pixel);
+	UStaticMesh* Cube = UAssetManager::GetAssetByPath<UStaticMesh>("Cube");
+	RenderCommand::BindMesh(Cube);
+
+	DrawDecals(SortDecals, DecalConstants, ViewProjection, CameraPosition, Projection, Viewport.Width, bAdditive, EDecalMode::ScreenSpace);
+}
+
+void FDecalRenderer::DrawProjected(
+	const TArray<FDecalSceneProxy*>& SortDecals,
+	FDecalConstants& DecalConstants,
+	FTexture2D* DepthTexture,
+	const FMatrix& ViewProjection,
+	const FVector& CameraPosition,
+	const FMatrix& Projection,
+	const FViewportSettings& Viewport,
+	bool bAdditive)
+{
+	RenderCommand::BindPipelineState(bAdditive ? ProjectedAdditivePipelineState : ProjectedPipelineState);
+	RenderCommand::BindSamplerState(0, ESamplerState::LinearClamp, EShaderBindFlagBits::Pixel);
+	RenderCommand::BindShaderResource(0, DepthTexture, EShaderBindFlagBits::Pixel);
+
+	DrawDecals(SortDecals, DecalConstants, ViewProjection, CameraPosition, Projection, Viewport.Width, bAdditive, EDecalMode::Projected);
 }
 
 void FDecalRenderer::OnRender(
@@ -135,42 +205,54 @@ void FDecalRenderer::OnRender(
 
 	TArray<FDecalSceneProxy*> SortDecals = Decals;
 	std::sort(SortDecals.begin(), SortDecals.end(), [](const FDecalSceneProxy* A, const FDecalSceneProxy* B) {
-			if (A->GetSortOrder() != B->GetSortOrder())
-			{
-				return (A->GetSortOrder() < B->GetSortOrder());
-			}
-			if (A->GetDecalTexture() != B->GetDecalTexture())
-			{
-				return (A->GetDecalTexture() < B->GetDecalTexture());
-			}
-			return (A < B);
+		if (A->GetSortOrder() != B->GetSortOrder())
+		{
+			return (A->GetSortOrder() < B->GetSortOrder());
+		}
+		if (A->GetDecalTexture() != B->GetDecalTexture())
+		{
+			return (A->GetDecalTexture() < B->GetDecalTexture());
+		}
+		return (A < B);
 		});
 
 	FDecalConstants DecalConstants = {};
-	
+
 	DecalConstants.InverseViewProjection = ViewProjection.Inverse();    // 루프 밖에서 한 번만 계산
 	DecalConstants.DecalInfo.ViewSize = FVector2(static_cast<float>(Viewport.Width), static_cast<float>(Viewport.Height));
+	DecalConstants.DecalInfo.NormalThreshold = FDecalSettings::GetNormalThreshold();
 
-	RenderCommand::BindSamplerState(0, ESamplerState::LinearClamp, EShaderBindFlagBits::Pixel);
-	RenderCommand::BindShaderResource(0, DepthTexture, EShaderBindFlagBits::Pixel);
-	UStaticMesh* Cube = UAssetManager::GetAssetByPath<UStaticMesh>("Cube");
-	RenderCommand::BindMesh(Cube);
+	const EDecalMode Mode = FDecalSettings::GetMode();
+
+	if (Mode == EDecalMode::Projected)
+	{
+		uint64 ProjectedVertices = 0;
+		for (const FDecalSceneProxy* Proxy : Decals)
+		{
+			ProjectedVertices += Proxy->GetProjectedVertexCount();
+		}
+		FStatRegistry::SetCounter(DecalStats::STAT_ProjectedVertices, ProjectedVertices);
+	}
 
 	// Show Flag가 꺼져도 패스는 실행해 버퍼를 비운다. 건너뛰면 UberLit이 지난 값을 읽는다.
 	RenderCommand::BeginRenderPass(DecalPass);
-	RenderCommand::BindPipelineState(PipelineState);
 	if (bShowDecals)
 	{
-		DrawDecals(SortDecals, DecalConstants, ViewProjection, CameraPosition, Projection, Viewport.Width, false);
+		if (Mode == EDecalMode::ScreenSpace)
+			DrawScreenSpace(SortDecals, DecalConstants, DepthTexture, ViewProjection, CameraPosition, Projection, Viewport, false);
+		else
+			DrawProjected(SortDecals, DecalConstants, DepthTexture, ViewProjection, CameraPosition, Projection, Viewport, false);
 	}
 	RenderCommand::EndRenderPass(DecalPass);
 
 	// Additive Decal이 없어도 지난 프레임 값이 남지 않게 패스는 항상 실행해 비운다.
 	RenderCommand::BeginRenderPass(AdditivePass);
-	RenderCommand::BindPipelineState(AdditivePipelineState);
 	if (bShowDecals)
 	{
-		DrawDecals(SortDecals, DecalConstants, ViewProjection, CameraPosition, Projection, Viewport.Width, true);
+		if (Mode == EDecalMode::ScreenSpace)
+			DrawScreenSpace(SortDecals, DecalConstants, DepthTexture, ViewProjection, CameraPosition, Projection, Viewport, true);
+		else
+			DrawProjected(SortDecals, DecalConstants, DepthTexture, ViewProjection, CameraPosition, Projection, Viewport, true);
 	}
 	RenderCommand::EndRenderPass(AdditivePass);
 

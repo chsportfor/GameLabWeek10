@@ -33,3 +33,9 @@ struct FParticleVertex
 	FVector Position;
 	FVector2 UV;
 };
+
+struct FDecalVertex
+{
+	FVector Position;
+	FVector2 UV;
+};

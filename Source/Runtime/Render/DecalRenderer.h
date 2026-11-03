@@ -5,6 +5,7 @@
 #include "Render/Renderer.h"
 #include "DecalInfo.h"
 #include "Engine/DecalSceneProxy.h"
+#include "Render/DecalSettings.h"
 
 struct FDecalConstants
 {
@@ -45,7 +46,7 @@ public:
 	);
 
 private:
-	// bAdditive와 값이 같은 Decal만 현재 렌더 타깃에 그린다.
+	// bAdditive와 값이 같은 Decal만 현재 렌더 타깃에 그린다. Mode에 따라 박스 또는 투영 메시를 그린다.
 	void DrawDecals(
 		const TArray<FDecalSceneProxy*>& SortDecals,
 		FDecalConstants& DecalConstants,
@@ -53,11 +54,36 @@ private:
 		const FVector& CameraPosition,
 		const FMatrix& Projection,
 		int32 ViewWidth,
-		bool bAdditive
+		bool bAdditive,
+		EDecalMode Mode
 	);
+
+	void DrawScreenSpace(
+		const TArray<FDecalSceneProxy*>& SortDecals,
+		FDecalConstants& DecalConstants,
+		FTexture2D* DepthTexture,
+		const FMatrix& ViewProjection,
+		const FVector& CameraPosition,
+		const FMatrix& Projection,
+		const FViewportSettings& Viewport,
+		bool bAdditive);
+
+	void DrawProjected(
+		const TArray<FDecalSceneProxy*>& SortDecals,
+		FDecalConstants& DecalConstants,
+		FTexture2D* DepthTexture,
+		const FMatrix& ViewProjection,
+		const FVector& CameraPosition,
+		const FMatrix& Projection,
+		const FViewportSettings& Viewport,
+		bool bAdditive);
 
 	FShaderProgram* Shader = nullptr;
 	FPipelineState PipelineState;
 	FPipelineState AdditivePipelineState;
+
+	FShaderProgram* ProjectedShader = nullptr;
+	FPipelineState ProjectedPipelineState;
+	FPipelineState ProjectedAdditivePipelineState;
 	TUniquePtr<FConstantBuffer> ConstantBuffer;
 };

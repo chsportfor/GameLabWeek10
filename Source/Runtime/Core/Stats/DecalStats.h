@@ -12,4 +12,10 @@ namespace DecalStats
     // Fade로 건너뛴 Decal은 세지 않고, 여러 View의 Draw는 합산한다.
     DECLARE_COUNTER_STAT("Decal Draw Calls", STAT_DrawCalls);
     DECLARE_COUNTER_STAT("Decal Additive Draw Calls", STAT_AdditiveDrawCalls);
+
+    // 투영 메시를 다시 자른 CPU 시간과 횟수다. 아무것도 바뀌지 않은 프레임에는 0이다.
+    DECLARE_CYCLE_STAT("Projected Decal Build CPU", STAT_ProjectedBuildCPU);
+    DECLARE_COUNTER_STAT("Projected Decal Builds", STAT_ProjectedBuilds);
+    // Projected 모드에서 전체 Decal이 가진 투영 메시 정점 수다.
+    DECLARE_COUNTER_STAT("Projected Decal Vertices", STAT_ProjectedVertices);
 }

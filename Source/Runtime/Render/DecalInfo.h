@@ -10,5 +10,6 @@ struct FDecalInfo
 	FMatrix			WorldToDecal;
 	FLinearColor	DecalColor = FLinearColor(1,1,1,1);
 	FVector2		ViewSize;
-	float			Padding[2];
+	float			NormalThreshold = -1.0f;	// cos(최대 각도). 투영 방향과의 각도가 더 크면 픽셀을 버린다.
+	float			Padding = 0.0f;
 };
