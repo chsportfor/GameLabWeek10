@@ -15,6 +15,7 @@ public:
 
 	UBillboardComponent* GetBillboardComponent() const;
 	UDecalComponent* GetDecalComponent() const;
+	UStaticMeshComponent* GetArrowComponent() const;
 
 private:
 	void SetupDecalRoot(UDecalComponent* InDecalComponent, const FString& IconPath);

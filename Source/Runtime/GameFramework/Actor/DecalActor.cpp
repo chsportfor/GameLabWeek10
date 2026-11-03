@@ -16,6 +16,11 @@ UDecalComponent* ADecalActor::GetDecalComponent() const
     return DecalComponent; 
 }
 
+UStaticMeshComponent* ADecalActor::GetArrowComponent() const
+{
+    return ArrowComponent;
+}
+
 ADecalActor::ADecalActor()
 {
     DecalComponent = CreateDefaultSubobject<UDecalComponent>("UDecalComponent");
