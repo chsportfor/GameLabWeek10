@@ -1,4 +1,4 @@
-﻿#include "EnginePCH.h"
+#include "EnginePCH.h"
 #include "Editor/Viewports/ViewportsPanel.h"
 #include "Editor/LevelEditor/MultipleViewports/Adapter/MultipleViewportsAdapter.h"
 
@@ -150,10 +150,17 @@ bool FViewportsPanel::ConsumeCameraPresetRequest(int32& OutViewIndex, EMultipleV
 void FViewportsPanel::OnRender()
 {
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{0.0f, 0.0f});
-	ImGui::Begin("Viewports", nullptr,
+	const bool bVisible = ImGui::Begin("Viewports", nullptr,
 		ImGuiWindowFlags_NoScrollbar |
-		ImGuiWindowFlags_NoScrollWithMouse |
-		ImGuiWindowFlags_NoTitleBar);
+		ImGuiWindowFlags_NoScrollWithMouse);
+	if (!bVisible)
+	{
+		bHovered = false;
+		bStatResetButtonVisible = false;
+		ImGui::End();
+		ImGui::PopStyleVar();
+		return;
+	}
 
 	ContentOrigin = ImGui::GetCursorScreenPos();
 	ContentSize = ImGui::GetContentRegionAvail();

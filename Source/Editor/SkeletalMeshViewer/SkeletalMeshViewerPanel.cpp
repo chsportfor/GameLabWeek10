@@ -432,26 +432,21 @@ void FSkeletalMeshViewerPanel::OnRender()
 	}
 
 	// 독립 윈도우 시작
-	if (!ImGui::Begin(GetPanelName(), &bOpen, ImGuiWindowFlags_MenuBar))
-	{
-		ImGui::End();
-		SetOpen(bOpen);
-		return;
-	}
+	const bool bVisible = ImGui::Begin(GetPanelName(), &bOpen, ImGuiWindowFlags_MenuBar);
 
-	DrawToolbarUI();
-	DrawAssetTabBar();
-
-	// 열려 있는 메시가 없을 때의 안내 화면
-	if (OpenedMeshes.Num() == 0 || !SelectedMesh)
+	if (bVisible)
 	{
-		ImGui::Spacing();
-		ImGui::TextDisabled("No Skeletal Mesh currently open.");
-		ImGui::Spacing();
-		ImGui::Text("You can open a mesh from the 'Mesh' menu above, or click [Edit] next to the SkeletalMesh property in the Details Panel.");
-		ImGui::End();
-		SetOpen(bOpen);
-		return;
+		DrawToolbarUI();
+		DrawAssetTabBar();
+
+		// 열려 있는 메시가 없을 때의 안내 화면
+		if (OpenedMeshes.Num() == 0 || !SelectedMesh)
+		{
+			ImGui::Spacing();
+			ImGui::TextDisabled("No Skeletal Mesh currently open.");
+			ImGui::Spacing();
+			ImGui::Text("You can open a mesh from the 'Mesh' menu above, or click [Edit] next to the SkeletalMesh property in the Details Panel.");
+		}
 	}
 
 	// 뷰어 내부 전용 DockSpace 생성 (레벨 에디터 패널과 도킹 격리)
@@ -462,12 +457,18 @@ void FSkeletalMeshViewerPanel::OnRender()
 	ImGuiID DockSpaceID = ImGui::GetID("SkeletalMeshViewerInnerDockSpace");
 
 	ImGuiDockNode* Node = ImGui::DockBuilderGetNode(DockSpaceID);
-	if (Node == nullptr || bResetLayout)
+	ImGuiWindow* SkelVpWin = ImGui::FindWindowByName("Skeletal Mesh Viewport");
+	const bool bSkelVpOrphaned = (SkelVpWin != nullptr && SkelVpWin->DockNode == nullptr && SkelVpWin->WasActive);
+
+	if (Node == nullptr || bResetLayout || (Node->IsLeafNode() && Node->Windows.Size == 0) || bSkelVpOrphaned)
 	{
 		bResetLayout = false;
+		ImVec2 Avail = ImGui::GetContentRegionAvail();
+		ImVec2 DockSize(std::max(Avail.x, 800.0f), std::max(Avail.y, 600.0f));
+
 		ImGui::DockBuilderRemoveNode(DockSpaceID);
 		ImGui::DockBuilderAddNode(DockSpaceID, ImGuiDockNodeFlags_DockSpace);
-		ImGui::DockBuilderSetNodeSize(DockSpaceID, ImGui::GetContentRegionAvail());
+		ImGui::DockBuilderSetNodeSize(DockSpaceID, DockSize);
 
 		ImGuiID CenterNode = DockSpaceID;
 		ImGuiID LeftNode = ImGui::DockBuilderSplitNode(CenterNode, ImGuiDir_Left, 0.22f, nullptr, &CenterNode);
@@ -481,25 +482,34 @@ void FSkeletalMeshViewerPanel::OnRender()
 		ImGui::DockBuilderFinish(DockSpaceID);
 	}
 
-	ImGui::DockSpace(DockSpaceID, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None, &SkelViewerClass);
+	const bool bHasActiveMesh = (OpenedMeshes.Num() > 0 && SelectedMesh != nullptr);
+	ImGuiDockNodeFlags InnerDockFlags = bHasActiveMesh ? ImGuiDockNodeFlags_None : ImGuiDockNodeFlags_KeepAliveOnly;
+	ImGui::DockSpace(DockSpaceID, ImVec2(0.0f, 0.0f), InnerDockFlags, &SkelViewerClass);
 	ImGui::End(); // Skeletal Mesh Viewer 메인 창 끝
 
-	// 4개의 내부 도킹 서브 패널 렌더링
-	if (bViewportOpen)
+	if (bHasActiveMesh)
 	{
-		DrawViewportWindow(SkelViewerClass);
+		// 4개의 내부 도킹 서브 패널 렌더링
+		if (bViewportOpen)
+		{
+			DrawViewportWindow(SkelViewerClass);
+		}
+		if (bSkeletonTreeOpen)
+		{
+			DrawSkeletonTreeWindow(SkelViewerClass);
+		}
+		if (bAssetDetailsOpen)
+		{
+			DrawAssetDetailsWindow(SkelViewerClass);
+		}
+		if (bPreviewSettingsOpen)
+		{
+			DrawPreviewSettingsWindow(SkelViewerClass);
+		}
 	}
-	if (bSkeletonTreeOpen)
+	else
 	{
-		DrawSkeletonTreeWindow(SkelViewerClass);
-	}
-	if (bAssetDetailsOpen)
-	{
-		DrawAssetDetailsWindow(SkelViewerClass);
-	}
-	if (bPreviewSettingsOpen)
-	{
-		DrawPreviewSettingsWindow(SkelViewerClass);
+		bViewportHovered = false;
 	}
 
 	SetOpen(bOpen);
@@ -567,7 +577,9 @@ void FSkeletalMeshViewerPanel::DrawAssetTabBar()
 
 void FSkeletalMeshViewerPanel::DrawViewportWindow(const ImGuiWindowClass& WindowClass)
 {
-	ImGui::SetNextWindowClass(&WindowClass);
+	ImGuiWindowClass ViewportClass = WindowClass;
+	ViewportClass.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_NoUndocking;
+	ImGui::SetNextWindowClass(&ViewportClass);
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 	const bool bVisible = ImGui::Begin("Skeletal Mesh Viewport", &bViewportOpen,
 		ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);

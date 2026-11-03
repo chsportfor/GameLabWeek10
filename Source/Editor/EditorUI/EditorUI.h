@@ -1,9 +1,7 @@
 #pragma once
 
 #include "Editor/EditorUI/EditorPanel.h"
-
 #include "Editor/LevelEditor/LevelEditorToolbar.h"
-
 #include <functional>
 
 enum class EEditorMode
@@ -41,19 +39,23 @@ public:
 	void SetSaveSceneCallback(std::function<void()> InCallback) { OnSaveScene = InCallback; }
 	void SetSaveSceneAsCallback(std::function<void()> InCallback) { OnSaveSceneAs = InCallback; }
 
+	void ResetLevelLayout() { bResetLevelLayout = true; }
+
+private:
+	void DrawMainMenuBar();
+	void DrawLevelEditorWorkspace(const struct ImGuiWindowClass& WindowClass);
+
 private:
 	bool bUseDockSpace = true;
 	bool bPassthruCentralNode = false;
 
 	EEditorMode CurrentMode = EEditorMode::LevelEditor;
 	bool bPendingTabSelect = false;
+	bool bResetLevelLayout = false;
 	std::function<void(EEditorMode)> OnEditorModeChanged;
-
-	void DrawMainMenuBar();
 
 	TArray<TUniquePtr<IEditorPanel>> Panels;
 	TUniquePtr<FLevelEditorToolbar> Toolbar;
-
 
 	std::function<void()> OnNewScene;
 	std::function<void()> OnOpenScene;
