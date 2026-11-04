@@ -51,7 +51,14 @@ public:
 	bool SaveCurrentMesh();
 	void ResetAllBonesToBindPose();
 
+	// 변형된 .bin을 원본 FBX 초기 포즈로 즉시 복원
+	bool RestoreToOriginalFBXPose();
+
+	// 이름을 입력받아 새로운 .fbx.bin 에셋으로 별도 저장 및 에디터 등록
+	bool SaveAsNewBin(const FString& NewAssetName);
+
 private:
+	void DrawSaveAsModal();
 	void ResizeViewport(uint32 NewWidth, uint32 NewHeight);
 	FBox CalculatePreviewBounds() const;
 	FTransform GetBoneLocalTransform(int32 BoneIndex) const;
@@ -165,4 +172,8 @@ private:
 	// 저장 상태 알림 메시지 및 타이머
 	FString SaveStatusMessage;
 	float SaveStatusTimer = 0.0f;
+
+	// Save As New .bin 모달 팝업 상태
+	bool bShowSaveAsModal = false;
+	char SaveAsNameBuffer[128] = "";
 };

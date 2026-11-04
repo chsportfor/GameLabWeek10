@@ -254,31 +254,45 @@ bool FSkeletalMeshBake::ReadBaked(const FString& SourcePath, std::optional<std::
 	return true;
 }
 
-void FSkeletalMeshBake::WriteBaked(const FString& SourcePath, std::filesystem::file_time_type SourceTime, const FFbxCookedData& Data)
+bool FSkeletalMeshBake::WriteBakedDirect(const std::filesystem::path& TargetBinPath, const FFbxCookedData& Data, int64 Stamp)
 {
-	const auto Source = SourceFile(SourcePath);
-	std::error_code Error;
-	if (std::filesystem::last_write_time(Source, Error) != SourceTime || Error || !Validate(Data))
-		return;
+	if (!Validate(Data))
+		return false;
 
-	auto BinPath = Source;
-	BinPath += ".bin";
-	auto TempPath = BinPath;
+	auto TempPath = TargetBinPath;
 	TempPath += ".tmp." + std::to_string(GetCurrentProcessId()) + "." + std::to_string(GetCurrentThreadId());
 
 	std::ofstream Out(TempPath, std::ios::binary | std::ios::trunc);
 	FBakeWriter Writer(Out);
-	const int64 Stamp = SourceTime.time_since_epoch().count();
 	const bool Written = Out && Writer.Pod(BakeMagic) && Writer.Pod(BakeVersion) &&
 		Writer.Pod(Stamp) && TransferMeshData(Writer, Data);
 	Out.close();
 
-	if (Written && Out && std::filesystem::last_write_time(Source, Error) == SourceTime && !Error)
+	std::error_code Error;
+	if (Written && Out)
 	{
-		std::filesystem::rename(TempPath, BinPath, Error);
-		if (!Error) return;
+		std::filesystem::rename(TempPath, TargetBinPath, Error);
+		if (!Error)
+		{
+			HTR_LOG(Info, "[FBX BAKE] {}: successfully written", TargetBinPath.string());
+			return true;
+		}
 	}
 
 	std::filesystem::remove(TempPath, Error);
-	HTR_LOG(Warning, "[FBX BAKE] {}.bin: cache not written", SourcePath);
+	HTR_LOG(Warning, "[FBX BAKE] {}: cache not written", TargetBinPath.string());
+	return false;
+}
+
+void FSkeletalMeshBake::WriteBaked(const FString& SourcePath, std::filesystem::file_time_type SourceTime, const FFbxCookedData& Data)
+{
+	const auto Source = SourceFile(SourcePath);
+	std::error_code Error;
+	if (std::filesystem::last_write_time(Source, Error) != SourceTime || Error)
+		return;
+
+	auto BinPath = Source;
+	BinPath += ".bin";
+	const int64 Stamp = SourceTime.time_since_epoch().count();
+	WriteBakedDirect(BinPath, Data, Stamp);
 }

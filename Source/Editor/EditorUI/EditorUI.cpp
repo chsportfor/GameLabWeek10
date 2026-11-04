@@ -188,7 +188,7 @@ void FEditorUI::DrawLevelEditorWorkspace(const ImGuiWindowClass& WindowClass)
 	}
 
 	// 중요: Level Editor 탭이 비활성(SkipItems) 상태이더라도 DockSpace()는 매 프레임 호출해야
-	// 내부적으로 KeepAliveOnly가 동작하여 자식 패널들이 도킹 해제(Undock)되지 않습니다!
+	// 내부적으로 KeepAliveOnly가 동작하여 자식 패널들이 도킹 해제(Undock)되지 않음
 	ImGui::DockSpace(levelDockId, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None, &WindowClass);
 	ImGui::End();
 }

@@ -14,6 +14,7 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "Render/Material.h"
+#include "Components/SkinnedMeshComponent.h"
 
 #include <algorithm>
 #include <cmath>
@@ -267,6 +268,130 @@ void FSkeletalMeshViewerPanel::ResetAllBonesToBindPose()
 		}
 		SaveStatusMessage = "Reset all bones to bind pose.";
 		SaveStatusTimer = 2.5f;
+	}
+}
+
+bool FSkeletalMeshViewerPanel::RestoreToOriginalFBXPose()
+{
+	if (!SelectedMesh)
+	{
+		SaveStatusMessage = "No skeletal mesh selected.";
+		SaveStatusTimer = 3.0f;
+		return false;
+	}
+
+	if (UAssetManager::Get().RestoreSkeletalMeshToOriginalFBX(SelectedMesh))
+	{
+		if (PreviewComponent)
+		{
+			PreviewComponent->ResetPoseToBindPose();
+		}
+		PreviewBounds = CalculatePreviewBounds();
+		SaveStatusMessage = "Restored to original FBX pose successfully!";
+		SaveStatusTimer = 3.5f;
+		return true;
+	}
+	else
+	{
+		SaveStatusMessage = "Failed to restore to original FBX pose.";
+		SaveStatusTimer = 3.5f;
+		return false;
+	}
+}
+
+bool FSkeletalMeshViewerPanel::SaveAsNewBin(const FString& NewAssetName)
+{
+	if (!SelectedMesh || NewAssetName.empty())
+	{
+		SaveStatusMessage = "Asset name cannot be empty.";
+		SaveStatusTimer = 3.0f;
+		return false;
+	}
+
+	// 1. 현재 프리뷰에서 변형된 본 로컬 트랜스폼을 적용한 복사본 MeshData 준비
+	FSkeletalMeshData NewMeshData = SelectedMesh->MeshData;
+	if (PreviewComponent)
+	{
+		const int32 NumBones = NewMeshData.Bones.Num();
+		for (int32 BoneIdx = 0; BoneIdx < NumBones; ++BoneIdx)
+		{
+			if (const FTransform* CurTf = PreviewComponent->GetBoneLocalTransform(BoneIdx))
+			{
+				NewMeshData.Bones[BoneIdx].RefPoseTransform = *CurTf;
+			}
+		}
+	}
+
+	// 2. AssetManager를 통해 새 .fbx.bin 파일 저장 및 에셋 등록
+	USkeletalMesh* NewMesh = UAssetManager::Get().SaveSkeletalMeshAsNewBin(SelectedMesh, NewAssetName, NewMeshData);
+	if (NewMesh)
+	{
+		OpenMesh(NewMesh);
+		SaveStatusMessage = "Saved and loaded new asset: " + NewMesh->GetPath();
+		SaveStatusTimer = 4.0f;
+		return true;
+	}
+	else
+	{
+		SaveStatusMessage = "Failed to save new .fbx.bin asset.";
+		SaveStatusTimer = 3.5f;
+		return false;
+	}
+}
+
+void FSkeletalMeshViewerPanel::DrawSaveAsModal()
+{
+	if (bShowSaveAsModal)
+	{
+		ImGui::OpenPopup("Save As New .bin##Modal");
+		bShowSaveAsModal = false;
+
+		if (SelectedMesh)
+		{
+			std::filesystem::path Path(SelectedMesh->GetPath());
+			FString Stem = Path.stem().string();
+			if (Stem.ends_with(".fbx")) Stem = Stem.substr(0, Stem.length() - 4);
+			Stem += "_Modified";
+			strcpy_s(SaveAsNameBuffer, sizeof(SaveAsNameBuffer), Stem.c_str());
+		}
+		else
+		{
+			strcpy_s(SaveAsNameBuffer, sizeof(SaveAsNameBuffer), "NewSkeletalMesh");
+		}
+	}
+
+	if (ImGui::BeginPopupModal("Save As New .bin##Modal", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::Text("Enter new asset name:");
+		ImGui::Spacing();
+		ImGui::SetNextItemWidth(350.0f);
+		if (ImGui::InputText("##NewBinNameInput", SaveAsNameBuffer, sizeof(SaveAsNameBuffer), ImGuiInputTextFlags_EnterReturnsTrue))
+		{
+			if (strlen(SaveAsNameBuffer) > 0)
+			{
+				SaveAsNewBin(SaveAsNameBuffer);
+				ImGui::CloseCurrentPopup();
+			}
+		}
+		ImGui::TextDisabled("Will be saved as: %s.fbx.bin", SaveAsNameBuffer);
+		ImGui::Spacing();
+		ImGui::Separator();
+		ImGui::Spacing();
+
+		if (ImGui::Button("Save", ImVec2(120.0f, 0.0f)))
+		{
+			if (strlen(SaveAsNameBuffer) > 0)
+			{
+				SaveAsNewBin(SaveAsNameBuffer);
+				ImGui::CloseCurrentPopup();
+			}
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)))
+		{
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::EndPopup();
 	}
 }
 
@@ -1471,9 +1596,13 @@ void FSkeletalMeshViewerPanel::DrawToolbarUI()
 				{
 					SaveCurrentMesh();
 				}
-				if (ImGui::MenuItem("Reset All Bones to Bind Pose"))
+				if (ImGui::MenuItem("Save As New .bin..."))
 				{
-					ResetAllBonesToBindPose();
+					bShowSaveAsModal = true;
+				}
+				if (ImGui::MenuItem("Restore to Original FBX Pose"))
+				{
+					RestoreToOriginalFBXPose();
 				}
 				ImGui::Separator();
 			}
@@ -1544,7 +1673,7 @@ void FSkeletalMeshViewerPanel::DrawToolbarUI()
 			ImGui::EndMenu();
 		}
 
-		// 4. 빠른 저장 버튼 및 상태 표시
+		// 4. 저장 및 복원 관련 툴바 버튼
 		if (SelectedMesh)
 		{
 			ImGui::Separator();
@@ -1554,7 +1683,27 @@ void FSkeletalMeshViewerPanel::DrawToolbarUI()
 			}
 			if (ImGui::IsItemHovered())
 			{
-				ImGui::SetTooltip("Save modified bone transforms to .bin file (Ctrl+S)");
+				ImGui::SetTooltip("Save modified bone transforms to current .bin file (Ctrl+S)");
+			}
+
+			ImGui::SameLine();
+			if (ImGui::Button("Save As New .bin"))
+			{
+				bShowSaveAsModal = true;
+			}
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("Save current modified pose as a new .fbx.bin asset and register to editor");
+			}
+
+			ImGui::SameLine();
+			if (ImGui::Button("Restore to Original FBX Pose"))
+			{
+				RestoreToOriginalFBXPose();
+			}
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("Discard modified pose and restore .bin to original FBX bind pose");
 			}
 
 			if (SaveStatusTimer > 0.0f)
@@ -1566,6 +1715,8 @@ void FSkeletalMeshViewerPanel::DrawToolbarUI()
 
 		ImGui::EndMenuBar();
 	}
+
+	DrawSaveAsModal();
 }
 
 void FSkeletalMeshViewerPanel::DrawMeshDetailsUI()
@@ -1650,30 +1801,6 @@ void FSkeletalMeshViewerPanel::DrawMeshDetailsUI()
 				++SlotIndex;
 			}
 		}
-	}
-
-	ImGui::Spacing();
-	ImGui::Separator();
-	ImGui::Spacing();
-	ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1.0f), "--- Pose Actions ---");
-	if (ImGui::Button("Save Mesh (Apply Ref Pose to .bin)", ImVec2(-1.0f, 26.0f)))
-	{
-		SaveCurrentMesh();
-	}
-	if (ImGui::IsItemHovered())
-	{
-		ImGui::SetTooltip("Save current modified bone poses as new bind pose and bake to .bin (Ctrl+S)");
-	}
-
-	if (ImGui::Button("Reset All Bones to Bind Pose", ImVec2(-1.0f, 24.0f)))
-	{
-		ResetAllBonesToBindPose();
-	}
-
-	if (SaveStatusTimer > 0.0f)
-	{
-		ImGui::Spacing();
-		ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1.0f), "%s", SaveStatusMessage.c_str());
 	}
 }
 
@@ -1774,7 +1901,7 @@ void FSkeletalMeshViewerPanel::DrawBoneHierarchyUI()
 	ImGui::InputTextWithHint("##BoneFilter", "Search bone name...", BoneSearchFilter, sizeof(BoneSearchFilter));
 
 	const float FooterHeight = (SelectedBoneIndex >= 0 && SelectedBoneIndex < Bones.Num())
-		? ImGui::GetFrameHeightWithSpacing() * 10.6f
+		? ImGui::GetFrameHeightWithSpacing() * 9.2f
 		: ImGui::GetFrameHeightWithSpacing() * 1.5f;
 
 	ImGui::BeginChild("BoneHierarchyScroll", ImVec2(0, -FooterHeight), true);
@@ -1874,11 +2001,6 @@ void FSkeletalMeshViewerPanel::DrawBoneHierarchyUI()
 		{
 			SelectedBoneIndex = -1;
 			BoneGizmo.SetTarget(nullptr, false);
-		}
-		ImGui::Spacing();
-		if (ImGui::Button("Save Mesh (Ctrl+S)", ImVec2(-1.0f, 24.0f)))
-		{
-			SaveCurrentMesh();
 		}
 	}
 	else
