@@ -11,6 +11,7 @@
 
 #include "Asset/ObjImporter/ObjImporter.h"
 #include "Asset/FBXImporter/FbxImporter.h"
+#include "Asset/FBXImporter/SkeletalMeshBake.h"
 
 #include "Render/GeometryGenerator.h"
 #include "UObject/UObjectGlobals.h"
@@ -532,23 +533,32 @@ USkeletalMesh* UAssetManager::LoadFbxSkeletonMesh(const FString& Path)
 		return Cached;
 	}
 
-	// Importer가 내부에서 FBX Scene을 생성하고, 엔진 데이터로 읽은 뒤 해제한다.
-	FFbxImporter Importer;
-	const FFbxImportResult ImportResult = Importer.ImportFBX(Path, Key);
-	if (!ImportResult.bSuccess)
-	{
-		HTR_LOG(Error, "[FBX] Skeletal mesh import failed: {}", Path);
-		return nullptr;
-	}
-
-	// Import 결과를 Cook한 뒤 GPU 버퍼와 실제 Material을 갖는 에셋을 만든다.
+	std::error_code SourceError;
+	const auto SourceTime = std::filesystem::last_write_time(
+		std::filesystem::path(std::u8string(Path.begin(), Path.end())), SourceError);
 	FSkeletalMeshData Data;
-	Importer.Cook(ImportResult, Data);
+	const bool LoadedFromBake = !SourceError && FSkeletalMeshBake::ReadBaked(Path, SourceTime, Data);
+	if (!LoadedFromBake)
+	{
+		FFbxImporter Importer;
+		const FFbxImportResult ImportResult = Importer.ImportFBX(Path, Key);
+		if (!ImportResult.bSuccess)
+		{
+			HTR_LOG(Error, "[FBX] Skeletal mesh import failed: {}", Path);
+			return nullptr;
+		}
+		Importer.Cook(ImportResult, Data);
+	}
 	USkeletalMesh* Mesh = CreateSkeletalMesh(&Data);
 	if (!Mesh)
 	{
 		HTR_LOG(Error, "[FBX] Skeletal mesh resource creation failed: {}", Path);
 		return nullptr;
+	}
+
+	if (!LoadedFromBake && !SourceError)
+	{
+		FSkeletalMeshBake::WriteBaked(Path, SourceTime, Data);
 	}
 
 	// 생성에 성공한 에셋만 등록하고, 다음 로드에서는 캐시를 반환한다.

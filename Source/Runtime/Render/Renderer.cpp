@@ -414,6 +414,20 @@ void FRenderer::RenderAll(FRenderQueue& InQueue, const FMatrix& ViewProjection, 
 	RenderTranslucent(ViewProjection);
 }
 
+void FRenderer::RenderPreview(FRenderQueue& InQueue, const FViewConstants& ViewConstants,
+	FConstantBuffer& PreviewLighting, FConstantBuffer& PreviewLightGrid)
+{
+	ResetStaticDrawGroups();
+	RenderQueueSorting(InQueue, ViewConstants);
+	RenderCommand::BindConstantBuffer(4, &PreviewLighting, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+	RenderCommand::BindConstantBuffer(5, &PreviewLightGrid, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+	// NumLocalLights와 CascadeCount가 0인 미리보기 전용 조명이다.
+	DrawPackets(0, FirstTranslucentIndex, ViewConstants.ViewProjection);
+	DrawPackets(FirstTranslucentIndex, SortEntries.Num(), ViewConstants.ViewProjection);
+	RenderPackets.Reset();
+	FirstTranslucentIndex = 0;
+}
+
 void FRenderer::RenderOpaque(const FMatrix& ViewProjection)
 {
 	RenderCommand::BindConstantBuffer(4, LightingCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);

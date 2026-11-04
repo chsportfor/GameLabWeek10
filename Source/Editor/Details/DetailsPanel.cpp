@@ -746,9 +746,12 @@ namespace
 
 					const char* SamplerItems[] = { "Linear Clamp", "Linear Wrap" };
 					int SamplerIndex = Effective ? static_cast<int>(Effective->SamplerState) : static_cast<int>(ESamplerState::LinearClamp);
-					if (ImGui::BeginCombo("##SamplerState", SamplerItems[SamplerIndex]))
+					const int SamplerCount = IM_ARRAYSIZE(SamplerItems);
+					const char* SamplerPreview = SamplerIndex >= 0 && SamplerIndex < SamplerCount
+						? SamplerItems[SamplerIndex] : "Unsupported";
+					if (ImGui::BeginCombo("##SamplerState", SamplerPreview))
 					{
-						for (int i = 0; i < static_cast<int>(ESamplerState::Count); ++i)
+						for (int i = 0; i < SamplerCount; ++i)
 						{
 							if (ImGui::Selectable(SamplerItems[i], SamplerIndex == i))
 							{
@@ -957,6 +960,49 @@ namespace
 		{
 			Object->PostEditChangeProperty(Property);
 		}
+	}
+
+	void DrawSkinningTestActions(USkeletalMeshComponent& Component)
+	{
+		USkeletalMesh* Mesh = Component.GetSkeletalMesh();
+		if (!Mesh) return;
+		if (!ImGui::CollapsingHeader("CPU Skinning Test", ImGuiTreeNodeFlags_DefaultOpen)) return;
+
+		const auto& Bones = Mesh->MeshData.Bones;
+		int32 ForearmIndex = -1;
+		for (int32 BoneIndex = 0; BoneIndex < Bones.Num(); ++BoneIndex)
+		{
+			if (Bones[BoneIndex].Name == "forearm.L")
+			{
+				ForearmIndex = BoneIndex;
+				break;
+			}
+		}
+		if (ForearmIndex == -1)
+		{
+			ImGui::TextDisabled("Test bone 'forearm.L' not found. Select the lowpoly mesh.");
+			return;
+		}
+		const FTransform* CurrentPose = Component.GetBoneLocalTransform(ForearmIndex);
+		if (!CurrentPose)
+		{
+			ImGui::TextDisabled("Bone pose is not initialized. Reassign the skeletal mesh.");
+			return;
+		}
+
+		ImGui::TextUnformatted("Left forearm: forearm.L");
+		ImGui::Text("Local rotation: %.1f / %.1f / %.1f",
+			CurrentPose->Rotation.Pitch, CurrentPose->Rotation.Yaw, CurrentPose->Rotation.Roll);
+		// 매번 원본 Ref에서 시작하므로 같은 버튼을 반복해도 회전은 누적되지 않는다.
+		if (ImGui::Button("Forearm 30 deg"))
+		{
+			FTransform Pose = Bones[ForearmIndex].RefPoseTransform;
+			Pose.Rotation.Roll += 30.0f;
+			Component.SetBoneLocalTransform(ForearmIndex, Pose);
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Reset Forearm"))
+			Component.SetBoneLocalTransform(ForearmIndex, Bones[ForearmIndex].RefPoseTransform);
 	}
 
 	// 클래스 계층을 따라 올라가며 각 단계의 프로퍼티를 표시
@@ -1405,6 +1451,8 @@ void FDetailsPanel::OnRender()
 			ImGui::PushID(TargetComponent);
 			ImGui::SeparatorText("Component Properties");
 			DrawProperties(TargetComponent, CustomFont);
+			if (USkeletalMeshComponent* SkeletalComponent = Cast<USkeletalMeshComponent>(TargetComponent))
+				DrawSkinningTestActions(*SkeletalComponent);
 
 			if (UScriptComponent* ScriptComponent = Cast<UScriptComponent>(TargetComponent))
 			{

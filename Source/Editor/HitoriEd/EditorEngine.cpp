@@ -30,6 +30,7 @@
 #include "Render/RenderCommand.h"
 #include "Editor/Outliner/OutlinerPanel.h"
 #include "Editor/Sequence/SequencePanel.h"
+#include "Editor/SkeletalMeshViewer/SkeletalMeshViewerPanel.h"
 #include "Sequence/SequenceActor.h"
 #include "Editor/HitoriEd/EditorFileUtils.h"
 #include "Editor/HitoriEd/EditorResourcePaths.h"
@@ -184,6 +185,11 @@ bool UEditorEngine::Init()
 	EditorControlsPanel = EditorUI->AddEditorPanel<FEditorControlsPanel>();
 	ViewportsPanel = EditorUI->AddEditorPanel<FViewportsPanel>();
 	ContentDrawerPanel = EditorUI->AddEditorPanel<FContentDrawerPanel>();
+	SkeletalMeshViewerPanel = EditorUI->AddEditorPanel<FSkeletalMeshViewerPanel>();
+	ContentDrawerPanel->SetOpenSkeletalMeshCallback([this](const FString& Path)
+	{
+		SkeletalMeshViewerPanel->OpenAsset(Path);
+	});
 	FSequencePanel* SequencePanel = EditorUI->AddEditorPanel<FSequencePanel>();
 	SequencePanel->SetSequenceActorProvider([this]() -> ASequenceActor*
 	{
@@ -412,6 +418,7 @@ void UEditorEngine::Tick(const float DeltaTime)
 			SceneTransitions->ProcessPendingTransition();
 	}
 	RenderMultipleViewports();
+	SkeletalMeshViewerPanel->RenderPreview(*Renderer);
 	EndFrame();
 }
 
@@ -1494,6 +1501,7 @@ void UEditorEngine::PreExit()
 	EditorWorld->ClearWorld();
 	// PIE 창이 열린 채 종료하면 Device가 살아 있을 때 Swapchain과 타깃을 먼저 정리한다.
 	DestroyPIEWindow();
+	SkeletalMeshViewerPanel->ReleaseResources();
 	ImGuiRenderer->Shutdown();
 
 	Super::PreExit();
