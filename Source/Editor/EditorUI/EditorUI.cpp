@@ -1,6 +1,8 @@
 #include "EnginePCH.h"
 #include "Editor/EditorUI/EditorUI.h"
 
+#include "imgui.h"
+#include "imgui_internal.h"
 
 bool FEditorUI::Init(bool bInUseDockSpace, bool bInPassthruCentralNode)
 {
@@ -16,17 +18,12 @@ void FEditorUI::Tick(float DeltaTime)
 {
 	for (auto& Panel : Panels)
 	{
-
 		Panel->Tick(DeltaTime);
 	}
 }
 
 void FEditorUI::OnRender()
 {
-	DrawMainMenuBar();
-
-	if (Toolbar) Toolbar->Draw();
-
 	if (bUseDockSpace)
 	{
 		static bool dockspaceOpen = true;
@@ -36,9 +33,6 @@ void FEditorUI::OnRender()
 			? ImGuiDockNodeFlags_PassthruCentralNode
 			: ImGuiDockNodeFlags_None;
 
-		// We are using the ImGuiWindowFlags_NoDocking flag to make the parent window not dockable into,
-		// because it would be confusing to have two docking targets within each others.
-		//ImGuiWindowFlags window_flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking;
 		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDocking;
 		if (optFullscreen)
 		{
@@ -51,33 +45,16 @@ void FEditorUI::OnRender()
 			windowFlags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
 			windowFlags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
 		}
-		else
-		{
-			dockspaceFlags &= ~ImGuiDockNodeFlags_PassthruCentralNode;
-		}
 
-		// When using ImGuiDockNodeFlags_PassthruCentralNode, DockSpace() will render our background
-		// and handle the pass-thru hole, so we ask Begin() to not render a background.
-		if (dockspaceFlags & ImGuiDockNodeFlags_PassthruCentralNode)
-			windowFlags |= ImGuiWindowFlags_NoBackground;
-
-		// Important: note that we proceed even if Begin() returns false (aka window is collapsed).
-		// This is because we want to keep our DockSpace() active. If a DockSpace() is inactive,
-		// all active windows docked into it will lose their parent and become undocked.
-		// We cannot preserve the docking relationship between an active window and an inactive docking, otherwise
-		// any change of dockspace/settings would lead to windows being stuck in limbo and never being visible.
 		if (!optPadding)
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 
-		//ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, Daydream::Application::GetInstance().isMaximzed ? ImVec2(6.0f, 6.0f) : ImVec2(0.0f, 0.0f));
-		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, false ? ImVec2(6.0f, 6.0f) : ImVec2(0.0f, 0.0f));
-		ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 2.0f);
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 		ImGui::PushStyleColor(ImGuiCol_MenuBarBg, ImVec4{ 0.0f, 0.0f, 0.0f, 0.0f });
 
 		ImGui::Begin("DockingSpace", &dockspaceOpen, windowFlags);
-		//m_DockSpacePos = { ImGui::GetWindowPos().x, ImGui::GetWindowPos().y };
-		//STS_CORE_WARN("Dock Space Coord = {0}, {1}", m_DockSpacePos.x, m_DockSpacePos.y);
-		ImGui::PopStyleColor(); // MenuBarBg
+		ImGui::PopStyleColor();
 		ImGui::PopStyleVar(2);
 
 		if (!optPadding)
@@ -86,33 +63,139 @@ void FEditorUI::OnRender()
 		if (optFullscreen)
 			ImGui::PopStyleVar(2);
 
-		// Submit the DockSpace
+		// 최상위 루트 DockSpace: [Level Editor]와 [Skeletal Mesh Viewer]가 탭으로 도킹되는 공간
 		ImGuiIO& io = ImGui::GetIO();
 		if (io.ConfigFlags & ImGuiConfigFlags_DockingEnable)
 		{
-			ImGuiID dockspace_id = ImGui::GetID("EngineDockingSpace");
-			ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspaceFlags);
+			ImGuiID rootDockId = ImGui::GetID("HitoriEngineRootDockSpace");
+
+			ImGuiDockNode* RootNode = ImGui::DockBuilderGetNode(rootDockId);
+			if (RootNode == nullptr || (RootNode->CentralNode == nullptr && RootNode->IsLeafNode()))
+			{
+				const ImGuiViewport* viewport = ImGui::GetMainViewport();
+				ImVec2 rootSize(std::max(viewport->WorkSize.x, 800.0f), std::max(viewport->WorkSize.y, 600.0f));
+				ImGui::DockBuilderRemoveNode(rootDockId);
+				ImGui::DockBuilderAddNode(rootDockId, ImGuiDockNodeFlags_DockSpace);
+				ImGui::DockBuilderSetNodeSize(rootDockId, rootSize);
+
+				ImGui::DockBuilderDockWindow("Level Editor", rootDockId);
+				ImGui::DockBuilderDockWindow("Skeletal Mesh Viewer", rootDockId);
+				ImGui::DockBuilderFinish(rootDockId);
+			}
+
+			ImGui::DockSpace(rootDockId, ImVec2(0.0f, 0.0f), dockspaceFlags);
 		}
 
 		ImGui::End();
 	}
 
+	// 1. 레벨 에디터 전용 WindowClass 정의 (스켈레탈 메시 창들과 완전히 분리)
+	ImGuiWindowClass LevelEditorClass;
+	LevelEditorClass.ClassId = ImHashStr("LevelEditorClass");
+	LevelEditorClass.DockingAllowUnclassed = false;
+
+	ImGuiWindowClass LevelViewportClass = LevelEditorClass;
+	LevelViewportClass.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_NoUndocking;
+
+	// 2. [ Level Editor ] 마스터 컨테이너 창 렌더링
+	DrawLevelEditorWorkspace(LevelEditorClass);
+
+	// 3. 서브 패널 렌더링
 	for (auto& Panel : Panels)
 	{
-		if (Panel->IsOpen())
+		if (!Panel->IsOpen())
+			continue;
+
+		const char* Name = Panel->GetPanelName();
+		const bool bIsSkelViewer = (strcmp(Name, "Skeletal Mesh Viewer") == 0);
+		const bool bIsMainViewport = (strcmp(Name, "Viewports") == 0);
+
+		if (bIsMainViewport)
 		{
-			Panel->OnRender();
+			ImGui::SetNextWindowClass(&LevelViewportClass);
 		}
+		else if (!bIsSkelViewer)
+		{
+			// 레벨 에디터 서브 패널들은 LevelEditorClass를 적용하여 오직 Level Editor 창 안에만 도킹됨!
+			ImGui::SetNextWindowClass(&LevelEditorClass);
+		}
+
+		Panel->OnRender();
 	}
 }
 
-// 파일 메뉴의 요청을 애플리케이션 콜백으로 전달한다.
+void FEditorUI::DrawLevelEditorWorkspace(const ImGuiWindowClass& WindowClass)
+{
+	// Level Editor 창 자체는 루트 DockSpace(HitoriEngineRootDockSpace)에 탭으로 도킹됨
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+	const bool bVisible = ImGui::Begin("Level Editor", nullptr,
+		ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+	ImGui::PopStyleVar();
+
+	if (bVisible)
+	{
+		// 레벨 에디터 전용 상단 메뉴바 (File / Window)
+		DrawMainMenuBar();
+
+		// 레벨 에디터 전용 상단 PIE 툴바
+		if (Toolbar)
+		{
+			Toolbar->Draw();
+		}
+	}
+
+	// 레벨 에디터 내부 전용 DockSpace
+	ImGuiID levelDockId = ImGui::GetID("LevelEditorInnerDockSpace");
+
+	ImGuiDockNode* LevelNode = ImGui::DockBuilderGetNode(levelDockId);
+	ImGuiWindow* ViewportsWin = ImGui::FindWindowByName("Viewports");
+	const bool bViewportsOrphaned = (ViewportsWin != nullptr && ViewportsWin->DockNode == nullptr && ViewportsWin->WasActive);
+
+	// 초기 상태이거나, 이전 크래시 ini로 인해 Viewports가 도킹에서 이탈했거나, 리셋 요청 시 레이아웃 재구성
+	const bool bNeedBuild = (LevelNode == nullptr)
+		|| bResetLevelLayout
+		|| (LevelNode->IsLeafNode() && LevelNode->Windows.Size == 0)
+		|| bViewportsOrphaned;
+
+	if (bNeedBuild)
+	{
+		bResetLevelLayout = false;
+		const ImGuiViewport* vp = ImGui::GetMainViewport();
+		ImVec2 avail = ImGui::GetContentRegionAvail();
+		ImVec2 dockSize(
+			avail.x > 100.0f ? avail.x : std::max(vp->WorkSize.x, 800.0f),
+			avail.y > 100.0f ? avail.y : std::max(vp->WorkSize.y, 600.0f));
+
+		ImGui::DockBuilderRemoveNode(levelDockId);
+		ImGui::DockBuilderAddNode(levelDockId, ImGuiDockNodeFlags_DockSpace);
+		ImGui::DockBuilderSetNodeSize(levelDockId, dockSize);
+
+		ImGuiID CenterNode = levelDockId;
+		ImGuiID DownNode = ImGui::DockBuilderSplitNode(CenterNode, ImGuiDir_Down, 0.25f, nullptr, &CenterNode);
+		ImGuiID RightNode = ImGui::DockBuilderSplitNode(CenterNode, ImGuiDir_Right, 0.25f, nullptr, &CenterNode);
+		ImGuiID RightBottomNode = ImGui::DockBuilderSplitNode(RightNode, ImGuiDir_Down, 0.65f, nullptr, &RightNode);
+		ImGuiID DownRightNode = ImGui::DockBuilderSplitNode(DownNode, ImGuiDir_Right, 0.40f, nullptr, &DownNode);
+
+		ImGui::DockBuilderDockWindow("Viewports", CenterNode);
+		ImGui::DockBuilderDockWindow("Outliner", RightNode);
+		ImGui::DockBuilderDockWindow("Details", RightBottomNode);
+		ImGui::DockBuilderDockWindow("Editor Controls", RightNode);
+		ImGui::DockBuilderDockWindow("Settings", RightNode);
+		ImGui::DockBuilderDockWindow("Content Drawer", DownNode);
+		ImGui::DockBuilderDockWindow("Sequence", DownNode);
+		ImGui::DockBuilderDockWindow("Output Log", DownRightNode);
+		ImGui::DockBuilderFinish(levelDockId);
+	}
+
+	// 중요: Level Editor 탭이 비활성(SkipItems) 상태이더라도 DockSpace()는 매 프레임 호출해야
+	// 내부적으로 KeepAliveOnly가 동작하여 자식 패널들이 도킹 해제(Undock)되지 않습니다!
+	ImGui::DockSpace(levelDockId, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None, &WindowClass);
+	ImGui::End();
+}
+
 void FEditorUI::DrawMainMenuBar()
 {
-	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 10.0f));
-	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 10.0f));
-
-	if (ImGui::BeginMainMenuBar())
+	if (ImGui::BeginMenuBar())
 	{
 		if (ImGui::BeginMenu("File"))
 		{
@@ -131,17 +214,23 @@ void FEditorUI::DrawMainMenuBar()
 		{
 			for (auto& Panel : Panels)
 			{
+				const char* Name = Panel->GetPanelName();
 				bool bOpen = Panel->IsOpen();
-
-				if (ImGui::MenuItem(Panel->GetPanelName(), nullptr, bOpen))
+				if (ImGui::MenuItem(Name, nullptr, bOpen))
 				{
 					Panel->SetOpen(!bOpen);
 				}
 			}
+
+			ImGui::Separator();
+			if (ImGui::MenuItem("Reset Level Editor Layout"))
+			{
+				bResetLevelLayout = true;
+			}
+
 			ImGui::EndMenu();
 		}
 
-		ImGui::EndMainMenuBar();
+		ImGui::EndMenuBar();
 	}
-	ImGui::PopStyleVar(2);
 }

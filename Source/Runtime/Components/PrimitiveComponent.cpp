@@ -90,6 +90,13 @@ void UPrimitiveComponent::PostEditChangeProperty(const FProperty& Property)
 		MarkRenderStateDirty();
 }
 
+FOutlineGeometry UPrimitiveComponent::GetOutlineGeometry() const
+{
+	const UStaticMesh* Mesh = GetRenderMesh();
+	if (!Mesh) return {};
+	return { Mesh->GetVertexBuffer(0), Mesh->GetIndexBuffer(0) };
+}
+
 bool UPrimitiveComponent::LineTraceComponentLocal(const FRay& LocalRay, float& OutT)
 {
 	const FStaticMeshData* Mesh = GetMeshData();

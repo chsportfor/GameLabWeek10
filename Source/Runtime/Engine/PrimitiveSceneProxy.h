@@ -21,7 +21,7 @@ public:
     explicit FPrimitiveSceneProxy(UPrimitiveComponent* InComponent) : Component(InComponent) {}
     virtual ~FPrimitiveSceneProxy();
     void UpdateTransform();
-    void UpdateRenderState();
+    virtual void UpdateRenderState();
     void OnMeshRenderDataChanged();
     void OnMeshDestroyed();
 

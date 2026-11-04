@@ -3,14 +3,14 @@
 #include "Renderer.h"
 #include "Asset/AssetManager.h"
 #include "Engine/PrimitiveSceneProxy.h"
+#include "Engine/SkeletonSceneProxy.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
 
 UStaticMesh::~UStaticMesh()
 {
-    for (FPrimitiveSceneProxy* Proxy : RenderProxies)
-        Proxy->OnMeshDestroyed();
+    for (FPrimitiveSceneProxy* Proxy : RenderProxies)  Proxy->OnMeshDestroyed();
 	VertexBuffer = nullptr;
 	IndexBuffer = nullptr;
 }
@@ -96,4 +96,73 @@ void UStaticMesh::UnregisterProxy(FPrimitiveSceneProxy* Proxy)
     const auto It = std::find(RenderProxies.begin(), RenderProxies.end(), Proxy);
     if (It != RenderProxies.end())
         RenderProxies.RemoveAtSwap(static_cast<uint32>(It - RenderProxies.begin()));
+}
+
+
+
+
+
+
+USkeletalMesh::~USkeletalMesh()
+{
+	// 메시보다 오래 살아 있는 Proxy의 참조를 정리한다.
+	for (FSkeletalMeshSceneProxy* Proxy : SkeletonRenderProxies)
+		Proxy->OnSkeletalMeshDestroyed();
+}
+
+void USkeletalMesh::RegisterProxy(FSkeletalMeshSceneProxy* Proxy)
+{
+	SkeletonRenderProxies.Add(Proxy);
+}
+
+void USkeletalMesh::UnregisterProxy(FSkeletalMeshSceneProxy* Proxy)
+{
+	const auto It = std::find(SkeletonRenderProxies.begin(), SkeletonRenderProxies.end(), Proxy);
+	if (It != SkeletonRenderProxies.end())
+		SkeletonRenderProxies.RemoveAtSwap(static_cast<uint32>(It - SkeletonRenderProxies.begin()));
+}
+
+UMaterial* USkeletalMesh::GetMaterial(uint32 SlotIndex) const
+{
+	if (SlotIndex < Materials.size() && Materials[SlotIndex])
+	{
+		return Materials[SlotIndex];
+	}
+	return UAssetManager::GetAssetByPath<UMaterial>("DefaultMaterial");
+}
+
+void USkeletalMesh::RebuildRenderData()
+{
+	bool bHasVertex = false;
+	for (int i = 0; i < MeshData.Meshes.Num(); i++)
+	{
+		const FSkeletalMesh& Mesh = MeshData.Meshes[i];
+		for (int j = 0; j < Mesh.Vertices.Num(); j++)
+		{
+			const FVector Position = Mesh.MeshTransform.TransformPosition(Mesh.Vertices[j].Vertex.Position);
+			if (!bHasVertex)
+			{
+				RenderBounds.Min = Position;
+				RenderBounds.Max = Position;
+				bHasVertex = true;
+			}
+			else
+			{
+				RenderBounds.Min.X = std::min(RenderBounds.Min.X, Position.X);
+				RenderBounds.Max.X = std::max(RenderBounds.Max.X, Position.X);
+				RenderBounds.Min.Y = std::min(RenderBounds.Min.Y, Position.Y);
+				RenderBounds.Max.Y = std::max(RenderBounds.Max.Y, Position.Y);
+				RenderBounds.Min.Z = std::min(RenderBounds.Min.Z, Position.Z);
+				RenderBounds.Max.Z = std::max(RenderBounds.Max.Z, Position.Z);
+			}
+		}
+	}
+	// 정점이 없으면 이전 계산 결과를 남기지 않고 원점으로 초기화한다.
+	if (!bHasVertex)
+	{
+		RenderBounds.Min = FVector();
+		RenderBounds.Max = FVector();
+	}
+	for (FSkeletalMeshSceneProxy* Proxy : SkeletonRenderProxies)
+		Proxy->OnMeshRenderDataChanged();
 }

@@ -7,7 +7,7 @@ class FOutline
 public:
 	void SetTarget(UPrimitiveComponent* InTarget) { Target = InTarget; }
 	UPrimitiveComponent* GetTarget() const { return Target; }
-	UStaticMesh* GetMesh() const { return Target ? Target->GetRenderMesh() : nullptr; }
+	FOutlineGeometry GetGeometry() const { return Target ? Target->GetOutlineGeometry() : FOutlineGeometry{}; }
 	FMatrix GetWorldMatrix() const { return Target->GetWorldMatrix(); }
 	const FVector& GetTargetScale() const { return Target->GetRelativeScale3D(); }
 private:

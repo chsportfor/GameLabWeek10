@@ -44,6 +44,7 @@
 #include "Text/Font.h"
 #include "Text/TextRenderer.h"
 
+class FSkeletalMeshViewerPanel;
 
 class UEditorEngine : public UEngine
 {
@@ -180,6 +181,7 @@ private:
 	FRenderQueue ArrowQueue;
 	FOutlinerPanel* OutlinerPanel = nullptr;
 	FContentDrawerPanel* ContentDrawerPanel = nullptr;
+	FSkeletalMeshViewerPanel* SkeletalMeshViewerPanel = nullptr;
 
 	UWorld* EditorWorld = nullptr;
 	UWorld* PlayWorld = nullptr;

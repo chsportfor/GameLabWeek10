@@ -67,7 +67,7 @@ namespace
 		}
 
 		return (static_cast<uint64>(Packet.Material->SortID) << 47)
-			| (static_cast<uint64>(Packet.Mesh->SortID) << 31)
+			| (static_cast<uint64>(Packet.Mesh ? Packet.Mesh->SortID : 0) << 31)
 			| (static_cast<uint64>(Packet.LODIndex & 0x3) << 29);
 	}
 
@@ -520,6 +520,20 @@ void FRenderer::RenderAll(FRenderQueue& InQueue, const FMatrix& ViewProjection, 
 	RenderTranslucent(ViewProjection);
 }
 
+void FRenderer::RenderPreview(FRenderQueue& InQueue, const FViewConstants& ViewConstants,
+	FConstantBuffer& PreviewLighting, FConstantBuffer& PreviewLightGrid)
+{
+	ResetStaticDrawGroups();
+	RenderQueueSorting(InQueue, ViewConstants);
+	RenderCommand::BindConstantBuffer(4, &PreviewLighting, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+	RenderCommand::BindConstantBuffer(5, &PreviewLightGrid, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+	// NumLocalLights와 CascadeCount가 0인 미리보기 전용 조명이다.
+	DrawPackets(0, FirstTranslucentIndex, ViewConstants.ViewProjection);
+	DrawPackets(FirstTranslucentIndex, SortEntries.Num(), ViewConstants.ViewProjection);
+	RenderPackets.Reset();
+	FirstTranslucentIndex = 0;
+}
+
 void FRenderer::RenderOpaque(const FMatrix& ViewProjection)
 {
 	RenderCommand::BindConstantBuffer(4, LightingCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
@@ -628,7 +642,7 @@ void FRenderer::RenderQueueSorting(FRenderQueue& InQueue, const FViewConstants& 
 		for (uint32 i = 0; i < RenderPackets.Num(); ++i)
 		{
 			const FRenderPacket& P = RenderPackets[i];
-			if (!P.Mesh || !P.Material) continue;
+			if (!P.GetVertexBuffer() || !P.GetIndexBuffer() || !P.Material) continue;
 			SortEntries.Add({ MakeSortKey(P), i });
 		}
 
@@ -1013,7 +1027,8 @@ void FRenderer::DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProject
 
 	LastMesh = nullptr;
 	LastMaterial = nullptr;
-	uint8 LastLODIndex = 0;
+	FVertexBuffer* LastVertexBuffer = nullptr;
+	FIndexBuffer* LastIndexBuffer = nullptr;
 
 	RenderCommand::BindConstantBuffer(0, ViewCB.get(), EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
 
@@ -1022,9 +1037,13 @@ void FRenderer::DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProject
 	{
 		const uint32 PacketIndex = SortEntries[k].PacketIndex;
 		const FRenderPacket& RenderPacket = RenderPackets[PacketIndex];
-		//if (RenderPacket.Mesh == nullptr || RenderPacket.Material == nullptr) continue;
-		if (RenderPacket.Mesh != LastMesh || RenderPacket.LODIndex != LastLODIndex) {
-			RenderCommand::BindMesh(RenderPacket.Mesh, RenderPacket.LODIndex);
+		FVertexBuffer* VertexBuffer = RenderPacket.GetVertexBuffer();
+		FIndexBuffer* IndexBuffer = RenderPacket.GetIndexBuffer();
+		if (VertexBuffer != LastVertexBuffer || IndexBuffer != LastIndexBuffer) {
+			RenderCommand::BindVertexBuffer(VertexBuffer);
+			RenderCommand::BindIndexBuffer(IndexBuffer);
+			LastVertexBuffer = VertexBuffer;
+			LastIndexBuffer = IndexBuffer;
 		}
 		if (RenderPacket.Material != LastMaterial) {
 			BindMaterial(RenderPacket.Material);
@@ -1042,12 +1061,11 @@ void FRenderer::DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProject
 		}
 
 		RenderCommand::DrawIndexed(
-			RenderPacket.IndexCount ? RenderPacket.IndexCount : RenderPacket.Mesh->GetIndexBuffer(RenderPacket.LODIndex)->GetIndexCount(),
+			RenderPacket.IndexCount ? RenderPacket.IndexCount : IndexBuffer->GetIndexCount(),
 			RenderPacket.StartIndex
 		);
 		LastMaterial = RenderPacket.Material;
 		LastMesh = RenderPacket.Mesh;
-		LastLODIndex = RenderPacket.LODIndex;
 	}
 }
 

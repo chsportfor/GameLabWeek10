@@ -3,11 +3,13 @@
 #include "Asset/RenderAsset.h"
 #include "Render/Buffer.h"
 #include "Render/StaticMeshData.h"
+#include "Render/SkeletalMeshData.h"
 #include "Render/MeshRenderData.h"
 #include <unordered_map>
 #include <vector>
 
 class FPrimitiveSceneProxy;
+class FSkeletalMeshSceneProxy;
 
 struct FStaticMeshLODResource
 {
@@ -77,4 +79,29 @@ private:
     FBox RenderBounds;
     std::unordered_map<std::vector<UMaterial*>, TWeakPtr<const FMeshRenderState>, FMaterialSlotsHash> RenderStates;
     TArray<FPrimitiveSceneProxy*> RenderProxies;
+};
+
+class USkeletalMesh : public URenderAsset
+{
+	DECLARE_CLASS(USkeletalMesh, URenderAsset)
+
+public:
+	~USkeletalMesh() override;
+
+	FSkeletalMeshData MeshData;
+	TArray<UMaterial*> Materials;
+	TUniquePtr<FVertexBuffer> VertexBuffer;
+	TUniquePtr<FIndexBuffer> IndexBuffer;
+	TArray<FSkeletalMeshSection> Sections;
+	FBox RenderBounds;
+
+    const FSkeletalMeshData& GetMeshData() const { return MeshData; }
+	UMaterial* GetMaterial(uint32 SlotIndex) const;
+    void RegisterProxy(FSkeletalMeshSceneProxy* Proxy);
+	void UnregisterProxy(FSkeletalMeshSceneProxy* Proxy);
+    const FBox& GetRenderBounds() const { return RenderBounds; }
+	void RebuildRenderData();
+
+private:
+	TArray<FSkeletalMeshSceneProxy*> SkeletonRenderProxies;
 };
