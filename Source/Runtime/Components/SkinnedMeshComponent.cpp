@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "SkinnedMeshComponent.h"
 #include "Render/RenderCommand.h"
+#include "Collision/Ray.h"
 
 void USkinnedMeshComponent::SetSkeletalMesh(USkeletalMesh* InSkeletalMesh)
 {
@@ -11,20 +12,56 @@ void USkinnedMeshComponent::SetSkeletalMesh(USkeletalMesh* InSkeletalMesh)
 	CurrentLocalTransforms.Reset();
 	CurrentGlobalMatrices.Reset();
 	SkinnedVertexBuffer.reset();
+	SkinnedVertices.Reset();
+	SkinnedIndices.Reset();
 	bHasSkinnedBounds = false;
-	if (SkeletalMesh)
-	{
-		const TArray<FSkeletalBone>& BoneArray = SkeletalMesh->MeshData.Bones;
-		CurrentLocalTransforms.Reserve(BoneArray.Num());
-		for (const FSkeletalBone& Bone : BoneArray)
-		{
-			CurrentLocalTransforms.Add(Bone.RefPoseTransform);
-		}
-	}
-	UpdateSkinning();
+	ResetPoseToBindPose();
 	ClearOverrideMaterials();
 	MarkRenderStateDirty();
 	OnTransformDirty();
+}
+
+void USkinnedMeshComponent::ResetPoseToBindPose()
+{
+	CurrentLocalTransforms.Reset();
+	if (SkeletalMesh)
+	{
+		const TArray<FSkeletalBone>& Bones = SkeletalMesh->MeshData.Bones;
+		CurrentLocalTransforms.Reserve(Bones.Num());
+		for (const FSkeletalBone& Bone : Bones)
+			CurrentLocalTransforms.Add(Bone.RefPoseTransform);
+	}
+	UpdateSkinning();
+}
+
+FOutlineGeometry USkinnedMeshComponent::GetOutlineGeometry() const
+{
+	if (!SkeletalMesh) return {};
+	return { SkinnedVertexBuffer.get(), SkeletalMesh->IndexBuffer.get() };
+}
+
+bool USkinnedMeshComponent::LineTraceComponentLocal(const FRay& LocalRay, float& OutT)
+{
+	const uint32 VertexCount = static_cast<uint32>(SkinnedVertices.Num());
+	const uint32 IndexCount = static_cast<uint32>(SkinnedIndices.Num());
+	float NearestT = OutT;
+	for (uint32 Index = 0; Index + 2 < IndexCount; Index += 3)
+	{
+		const uint32 I0 = SkinnedIndices[Index];
+		const uint32 I1 = SkinnedIndices[Index + 1];
+		const uint32 I2 = SkinnedIndices[Index + 2];
+		if (I0 >= VertexCount || I1 >= VertexCount || I2 >= VertexCount)
+			continue;
+
+		float T;
+		if (RayIntersectsTriangle(LocalRay, SkinnedVertices[I0].Position, SkinnedVertices[I1].Position,
+			SkinnedVertices[I2].Position, T) && T < NearestT)
+			NearestT = T;
+	}
+
+	if (NearestT >= OutT) return false;
+	OutT = NearestT;
+	return true;
 }
 
 const FTransform* USkinnedMeshComponent::GetBoneLocalTransform(int32 BoneIndex) const
@@ -179,6 +216,8 @@ void USkinnedMeshComponent::UpdateSkinning()
 		SkinnedBounds.Max.Y = std::max(SkinnedBounds.Max.Y, Vertex.Position.Y);
 		SkinnedBounds.Max.Z = std::max(SkinnedBounds.Max.Z, Vertex.Position.Z);
 	}
+	SkinnedVertices = std::move(ResultVertex);
+	SkinnedIndices = std::move(ResultIndices);
 	bHasSkinnedBounds = true;
 	OnTransformDirty();
 }

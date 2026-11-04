@@ -19,6 +19,9 @@ public:
 	bool SetBoneLocalTransform(int32 BoneIndex, const FTransform& InTransform);
 	int32 GetNumMaterials() const override;
 	void UpdateSkinning();
+	void ResetPoseToBindPose();
+	bool LineTraceComponentLocal(const FRay& LocalRay, float& OutT) override;
+	FOutlineGeometry GetOutlineGeometry() const override;
 	FString GetMaterialSlotName(int32 SlotIndex) const override;
 	UMaterial* GetDefaultMaterial(int32 SlotIndex) const override;
 	FVertexBuffer* GetSkinnedVertexBuffer() const{return SkinnedVertexBuffer.get();}
@@ -35,6 +38,8 @@ private:
 	TArray<FTransform> CurrentLocalTransforms;
 	TArray<FMatrix> CurrentGlobalMatrices;
 	TUniquePtr<FVertexBuffer> SkinnedVertexBuffer;
+	TArray<FVertex> SkinnedVertices;
+	TArray<uint32> SkinnedIndices;
 	FBox SkinnedBounds;
 	bool bHasSkinnedBounds = false;
 };

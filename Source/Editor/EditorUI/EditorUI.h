@@ -1,9 +1,7 @@
 #pragma once
 
 #include "Editor/EditorUI/EditorPanel.h"
-
 #include "Editor/LevelEditor/LevelEditorToolbar.h"
-
 #include <functional>
 
 class FEditorUI
@@ -32,14 +30,17 @@ public:
 	void SetSaveSceneAsCallback(std::function<void()> InCallback) { OnSaveSceneAs = InCallback; }
 
 private:
+	void DrawMainMenuBar();
+	void DrawLevelEditorWorkspace(const struct ImGuiWindowClass& WindowClass);
+
+private:
 	bool bUseDockSpace = true;
 	bool bPassthruCentralNode = false;
 
-	void DrawMainMenuBar();
+	bool bResetLevelLayout = false;
 
 	TArray<TUniquePtr<IEditorPanel>> Panels;
 	TUniquePtr<FLevelEditorToolbar> Toolbar;
-
 
 	std::function<void()> OnNewScene;
 	std::function<void()> OnOpenScene;

@@ -1452,7 +1452,12 @@ void FDetailsPanel::OnRender()
 			ImGui::SeparatorText("Component Properties");
 			DrawProperties(TargetComponent, CustomFont);
 			if (USkeletalMeshComponent* SkeletalComponent = Cast<USkeletalMeshComponent>(TargetComponent))
+			{
+				USkeletalMesh* Mesh = SkeletalComponent->GetSkeletalMesh();
+				if (Mesh && OpenSkeletalMeshViewer && ImGui::Button("Edit Skeletal Mesh"))
+					OpenSkeletalMeshViewer(Mesh);
 				DrawSkinningTestActions(*SkeletalComponent);
+			}
 
 			if (UScriptComponent* ScriptComponent = Cast<UScriptComponent>(TargetComponent))
 			{

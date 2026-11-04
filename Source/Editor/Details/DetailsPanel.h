@@ -9,6 +9,7 @@
 struct FTransform;
 class FRenderer;
 class ULightComponent;
+class USkeletalMesh;
 
 using DetailsSelectionCallback = std::function<void(UActorComponent*)>;
 using DetailsDeleteComponentCallback = std::function<void(UActorComponent*)>;
@@ -41,6 +42,10 @@ public:
 	void SetMakeRootCallback(DetailsMakeRootCallback InCallback) { MakeRootCallback = InCallback; }
 
 	void SetWorld(UWorld* InWorld) { World = InWorld; }
+	void SetOpenSkeletalMeshViewerCallback(std::function<void(USkeletalMesh*)> Callback)
+	{
+		OpenSkeletalMeshViewer = std::move(Callback);
+	}
 	// Renderer를 소유하지 않으며, 미리보기 조회에만 사용한다.
 	void SetRenderer(const FRenderer* InRenderer) { Renderer = InRenderer; }
 	void SetShadowCascadeDebugCallbacks(std::function<bool(uint32)> InGetter, std::function<void(uint32, bool)> InSetter)
@@ -66,6 +71,7 @@ private:
 	DetailsSelectionCallback Callback;
 	DetailsDeleteComponentCallback DeleteCallback;
 	DetailsMakeRootCallback MakeRootCallback;
+	std::function<void(USkeletalMesh*)> OpenSkeletalMeshViewer;
 
 	UActorComponent* PendingDeleteComponent = nullptr;
 	USceneComponent* PendingMakeRootComponent = nullptr;

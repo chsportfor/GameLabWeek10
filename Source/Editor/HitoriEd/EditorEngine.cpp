@@ -186,6 +186,13 @@ bool UEditorEngine::Init()
 	ViewportsPanel = EditorUI->AddEditorPanel<FViewportsPanel>();
 	ContentDrawerPanel = EditorUI->AddEditorPanel<FContentDrawerPanel>();
 	SkeletalMeshViewerPanel = EditorUI->AddEditorPanel<FSkeletalMeshViewerPanel>();
+	SkeletalMeshViewerPanel->SetRenderer(Renderer);
+	SkeletalMeshViewerPanel->SetGridRenderer(GridRenderer.get());
+	SkeletalMeshViewerPanel->SetGizmoRenderer(GizmoRenderer.get());
+	DetailsPanel->SetOpenSkeletalMeshViewerCallback([this](USkeletalMesh* Mesh)
+	{
+		SkeletalMeshViewerPanel->OpenMesh(Mesh);
+	});
 	ContentDrawerPanel->SetOpenSkeletalMeshCallback([this](const FString& Path)
 	{
 		SkeletalMeshViewerPanel->OpenAsset(Path);
@@ -418,7 +425,7 @@ void UEditorEngine::Tick(const float DeltaTime)
 			SceneTransitions->ProcessPendingTransition();
 	}
 	RenderMultipleViewports();
-	SkeletalMeshViewerPanel->RenderPreview(*Renderer);
+	SkeletalMeshViewerPanel->RenderPreview();
 	EndFrame();
 }
 
@@ -584,6 +591,9 @@ void UEditorEngine::UpdateMultipleViewportState(const float DeltaTime)
 		SettingsPanel->GetMutableSettings().MultipleViewportsHorizontal = Ratio.Horizontal;
 		SettingsPanel->GetMutableSettings().MultipleViewportsVertical = Ratio.Vertical;
 	}
+
+	if (SkeletalMeshViewerPanel->IsOpen() && SkeletalMeshViewerPanel->IsHoveredOrInteracting())
+		return;
 
 	MultipleViewportsAdapter.UpdateInput(
 		DeltaTime,
@@ -1320,6 +1330,9 @@ void UEditorEngine::RenderDepthPass(const int32 ViewIndex, const FRenderingInfo&
 // 입력 View의 Ray와 피킹으로 Gizmo·공유 선택을 갱신한다.
 void UEditorEngine::UpdateGizmoAndPicking()
 {
+	if (SkeletalMeshViewerPanel->IsOpen() && SkeletalMeshViewerPanel->IsHoveredOrInteracting())
+		return;
+
 	// Delete는 BeginFrame에서 한 번만 처리하고 여기서는 View 입력만 다룬다.
 	const int32 ViewIndex = MultipleViewportsAdapter.GetActiveViewIndex();
 	if (ViewIndex == InvalidViewIndex || !ViewportsPanel->IsHovered())
@@ -1375,6 +1388,8 @@ void UEditorEngine::UpdateGizmoAndPicking()
 		FHitResult Hit;
 		const bool bHit = ViewWorld->LineTraceSingle(Ray, Hit, ResolveBillboardTransform, &MultipleViewportsAdapter);
 		OutlinerPanel->SelectActor(bHit ? Hit.HitComponent->GetOwner() : nullptr);
+		if (bHit)
+			Outline->SetTarget(Hit.HitComponent);
 	}
 }
 
