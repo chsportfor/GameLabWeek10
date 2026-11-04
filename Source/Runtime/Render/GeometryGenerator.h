@@ -18,6 +18,7 @@ public:
 	static TUniquePtr<FStaticMeshData> CreateCube(float Size, const FVector4& Color = FVector4(1.0f, 1.0f, 1.0f, 1.0f));
 
 	static TUniquePtr<FStaticMeshData> CreateSphere(float _radius, uint32 _numSlices, uint32 _numStacks, const FVector4& Color);
+	static TUniquePtr<FStaticMeshData> CreateOctahedralBone(float Width = 1.0f, float Length = 1.0f, float HeadRatio = 0.16f, const FVector4& Color = FVector4(1.0f, 1.0f, 1.0f, 1.0f));
 
 	static FStaticMeshData* GetMeshData(const FString& InName);
 

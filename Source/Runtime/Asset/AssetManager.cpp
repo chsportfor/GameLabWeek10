@@ -369,6 +369,9 @@ void UAssetManager::CreateDefaultMeshes()
 	FStaticMeshData* GizmoSphereData = FGeometryGenerator::GetMeshData("GizmoSphere");
 	RegisterAsset("GizmoSphere", CreateStaticMesh(GizmoSphereData));
 
+	FStaticMeshData* OctahedralBoneData = FGeometryGenerator::GetMeshData("OctahedralBone");
+	RegisterAsset("OctahedralBone", CreateStaticMesh(OctahedralBoneData));
+
 	const FParticleVertex Vertices[] =
 	{
 		{ FVector(0.0f, -0.5f,  0.5f), FVector2(0.0f, 0.0f) },
@@ -642,23 +645,38 @@ bool UAssetManager::SaveSkeletalMesh(USkeletalMesh* Mesh)
 	}
 
 	fs::path SourceFile = Mesh->GetPath();
-	if (!fs::exists(SourceFile))
+	if (IsFbxBakePath(SourceFile))
+	{
+		SourceFile.replace_extension();
+	}
+
+	fs::path BinFile = SourceFile;
+	BinFile += ".bin";
+
+	if (!fs::exists(SourceFile) && !fs::exists(BinFile))
 	{
 		SourceFile = fs::path("Assets") / SourceFile;
+		BinFile = fs::path("Assets") / BinFile;
 	}
 
-	if (!fs::exists(SourceFile))
+	const bool bFbxExists = fs::exists(SourceFile);
+	const bool bBinExists = fs::exists(BinFile);
+
+	if (!bFbxExists && !bBinExists)
 	{
-		HTR_LOG(Error, "[FBX] Cannot save: Source FBX file does not exist: {}", Mesh->GetPath());
+		HTR_LOG(Error, "[FBX] Cannot save: Neither source FBX nor baked .bin exists for: {}", Mesh->GetPath());
 		return false;
 	}
 
-	std::error_code Error;
-	const auto SourceTime = fs::last_write_time(SourceFile, Error);
-	if (Error)
+	int64 Stamp = 0;
+	if (bFbxExists)
 	{
-		HTR_LOG(Error, "[FBX] Cannot get last write time for: {}", SourceFile.string());
-		return false;
+		std::error_code Error;
+		const auto SourceTime = fs::last_write_time(SourceFile, Error);
+		if (!Error)
+		{
+			Stamp = SourceTime.time_since_epoch().count();
+		}
 	}
 
 	const FString SourcePath = ToUTF8String(SourceFile);
@@ -669,7 +687,11 @@ bool UAssetManager::SaveSkeletalMesh(USkeletalMesh* Mesh)
 	CookedData.SkeletalMesh = Mesh->MeshData;
 
 	// 디스크의 .bin 바이너리 파일로 직렬화하여 영구 저장
-	FSkeletalMeshBake::WriteBaked(SourcePath, SourceTime, CookedData);
+	if (!FSkeletalMeshBake::WriteBakedDirect(BinFile, CookedData, Stamp))
+	{
+		HTR_LOG(Error, "[FBX] Failed to save .bin file: {}", BinFile.string());
+		return false;
+	}
 
 	// 현재 씬에 배치된 모든 스켈레탈 메시 컴포넌트들을 새로운 RefPose 및 스키닝에 맞춰 갱신
 	for (TObjectIterator<USkinnedMeshComponent> Itr; Itr; ++Itr)
@@ -683,7 +705,7 @@ bool UAssetManager::SaveSkeletalMesh(USkeletalMesh* Mesh)
 	}
 
 	Mesh->RebuildRenderData();
-	HTR_LOG(Info, "[FBX] Skeletal mesh successfully saved: {}.bin", SourcePath);
+	HTR_LOG(Info, "[FBX] Skeletal mesh successfully saved: {}", BinFile.string());
 	return true;
 }
 
@@ -707,7 +729,7 @@ bool UAssetManager::RestoreSkeletalMeshToOriginalFBX(USkeletalMesh* Mesh)
 
 	if (!fs::exists(SourceFile))
 	{
-		HTR_LOG(Error, "[FBX] Cannot restore: Source FBX file not found: {}", Mesh->GetPath());
+		HTR_LOG(Warning, "[FBX] Cannot restore: Original source FBX file does not exist for: {} (standalone .bin asset)", Mesh->GetPath());
 		return false;
 	}
 

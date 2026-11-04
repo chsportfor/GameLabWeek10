@@ -80,8 +80,10 @@ private:
 	void DrawLightingSettingsUI();
 	void DrawBoneNode(int32 BoneIndex, const TArray<struct FSkeletalBone>& Bones);
 
-	// 1~3단계: 골격(Bone) 3D 원뿔/선 렌더링, 에디터 기즈모 연동, 실시간 스키닝 및 뷰포트 피킹
+	// 1~3단계: 골격(Bone) 3D 메시 렌더링, 에디터 기즈모 연동, 실시간 스키닝 및 뷰포트 피킹
 	void ComputeBoneWorldMatrices(TArray<FMatrix>& OutBoneWorldMatrices) const;
+	void UpdateBoneInteraction();
+	void Render3DBones(const FMatrix& ViewProj);
 	void DrawSkeletonOverlay(const struct ImVec2& ViewportOrigin, const struct ImVec2& ViewportSize);
 	bool IsBoneAncestorOf(int32 AncestorIndex, int32 TargetBoneIndex, const TArray<struct FSkeletalBone>& Bones) const;
 
@@ -161,7 +163,7 @@ private:
 	bool bDrawBoneCones = true;      // true: 입체 원뿔(Cone/Pyramid) 렌더링, false: 선(Line) 렌더링
 	bool bShowAllBoneNames = false;  // 모든 본 이름 표시 여부 (선택된 본은 항상 표시)
 	float BoneConeWidthRatio = 0.10f;
-	float BoneJointRadius = 4.0f;
+	float BoneJointRadius = 2.5f;
 
 	// 본 트리 UI 및 피킹 상태
 	int32 SelectedBoneIndex = -1;
@@ -172,6 +174,16 @@ private:
 	// 저장 상태 알림 메시지 및 타이머
 	FString SaveStatusMessage;
 	float SaveStatusTimer = 0.0f;
+
+	// 골격(Bone) 3D 메시 렌더링 자원
+	UStaticMesh* BoneMesh = nullptr;
+	UStaticMesh* BoneSphereMesh = nullptr;
+	FShaderProgram* BoneShader = nullptr;
+	FPipelineState BonePipelineState{};
+	TUniquePtr<FConstantBuffer> BoneCB;
+
+	ImVec2 CachedViewportOrigin{ 0.0f, 0.0f };
+	ImVec2 CachedViewportSize{ 0.0f, 0.0f };
 
 	// Save As New .bin 모달 팝업 상태
 	bool bShowSaveAsModal = false;

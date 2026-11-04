@@ -14,6 +14,7 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "Render/Material.h"
+#include "Render/RenderResourceManager.h"
 #include "Components/SkinnedMeshComponent.h"
 
 #include <algorithm>
@@ -43,9 +44,16 @@ bool FSkeletalMeshViewerPanel::Init()
 	// 기본 뷰포트 크기 초기화
 	ResizeViewport(800, 600);
 
+	// 골격(Bone) 3D 메시 렌더링 자원 준비
+	BoneMesh = UAssetManager::GetAssetByPath<UStaticMesh>("OctahedralBone");
+	BoneSphereMesh = UAssetManager::GetAssetByPath<UStaticMesh>("GizmoSphere");
+	BoneCB = RenderCommand::CreateConstantBuffer(sizeof(FGizmoData));
+	BoneShader = FRenderResourceManager::GetShaderProgram("Resources/Shader/GizmoShader.hlsl");
+	BonePipelineState.Shader = BoneShader;
+	BonePipelineState.Topology = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+
 	// 기본 상태: 닫혀 있음 (Window 메뉴 또는 Details 패널의 Edit 버튼으로 오픈)
 	SetOpen(false);
-
 
 	return true;
 }
@@ -84,6 +92,10 @@ void FSkeletalMeshViewerPanel::ReleaseResources()
 	VisibleStaticMeshes.Reset();
 	PreviewLighting.reset();
 	PreviewLightGrid.reset();
+	BoneCB.reset();
+	BoneMesh = nullptr;
+	BoneSphereMesh = nullptr;
+	BoneShader = nullptr;
 	OpenedMeshes.Reset();
 	SelectedMesh = nullptr;
 	MeshToSelect = nullptr;
@@ -293,7 +305,7 @@ bool FSkeletalMeshViewerPanel::RestoreToOriginalFBXPose()
 	}
 	else
 	{
-		SaveStatusMessage = "Failed to restore to original FBX pose.";
+		SaveStatusMessage = "Cannot restore: Original .fbx file does not exist.";
 		SaveStatusTimer = 3.5f;
 		return false;
 	}
@@ -538,6 +550,7 @@ void FSkeletalMeshViewerPanel::Tick(float DeltaTime)
 
 	HandleInput(DeltaTime);
 	UpdateCamera(DeltaTime);
+	UpdateBoneInteraction();
 }
 
 void FSkeletalMeshViewerPanel::HandleInput(float DeltaTime)
@@ -853,6 +866,9 @@ void FSkeletalMeshViewerPanel::RenderPreview()
 			Renderer->RenderPreview(RenderQueue, ViewConstants, *PreviewLighting, *PreviewLightGrid);
 		}
 
+		// 본 3D 메시 및 관절 렌더링
+		Render3DBones(ViewProj);
+
 		// 3단계: 에디터와 100% 동일한 3D 기즈모(FGizmoRenderer)를 선택된 본 위치에 렌더링
 		if (GizmoRenderer && BoneGizmoTarget && SelectedBoneIndex >= 0 && SelectedBoneIndex < static_cast<int32>(SelectedMesh->MeshData.Bones.Num()))
 		{
@@ -1071,10 +1087,12 @@ void FSkeletalMeshViewerPanel::DrawViewportWindow(const ImGuiWindowClass& Window
 			const ImVec2 CursorPos = ImGui::GetCursorScreenPos();
 			const ImVec2 ImageSize(static_cast<float>(ViewportWidth), static_cast<float>(ViewportHeight));
 			bViewportVisible = true;
+			CachedViewportOrigin = CursorPos;
+			CachedViewportSize = ImageSize;
 			ImGui::Image(ColorTarget->GetSRV(), ImageSize);
 			bViewportHovered = ImGui::IsItemHovered();
 
-			// 1단계 & 2단계: 바인드 포즈(현재 포즈) 부모-자식 본(Cone/Line) 렌더링, 본 선택 하이라이트 및 뷰포트 피킹
+			// 2단계: 뷰포트 본 이름 텍스트 라벨 및 선택 하이라이트 태그 오버레이
 			DrawSkeletonOverlay(CursorPos, ImageSize);
 
 			ImDrawList* DrawList = ImGui::GetWindowDrawList();
@@ -1172,9 +1190,9 @@ bool FSkeletalMeshViewerPanel::IsBoneAncestorOf(int32 AncestorIndex, int32 Targe
 	return false;
 }
 
-void FSkeletalMeshViewerPanel::DrawSkeletonOverlay(const ImVec2& ViewportOrigin, const ImVec2& ViewportSize)
+void FSkeletalMeshViewerPanel::UpdateBoneInteraction()
 {
-	if (!SelectedMesh || ViewportSize.x <= 1.0f || ViewportSize.y <= 1.0f)
+	if (!SelectedMesh || CachedViewportSize.x <= 1.0f || CachedViewportSize.y <= 1.0f)
 		return;
 
 	const TArray<FSkeletalBone>& Bones = SelectedMesh->MeshData.Bones;
@@ -1194,7 +1212,6 @@ void FSkeletalMeshViewerPanel::DrawSkeletonOverlay(const ImVec2& ViewportOrigin,
 		|| IO.KeyAlt
 		|| ImGui::IsKeyDown(ImGuiKey_L);
 
-	// 3단계: 3D 기즈모(FGizmo) 입력 업데이트 및 본 행렬/스키닝 실시간 변형 반영
 	bool bGizmoBlocksPick = false;
 	if (PreviewComponent && BoneGizmoTarget && SelectedBoneIndex >= 0 && SelectedBoneIndex < NumBones)
 	{
@@ -1215,9 +1232,9 @@ void FSkeletalMeshViewerPanel::DrawSkeletonOverlay(const ImVec2& ViewportOrigin,
 
 		if ((bViewportHovered && !bCameraManipulating) || BoneGizmo.IsUsing())
 		{
-			const FVector2 LocalMousePos(IO.MousePos.x - ViewportOrigin.x, IO.MousePos.y - ViewportOrigin.y);
-			const float NdcX = (LocalMousePos.X / ViewportSize.x) * 2.0f - 1.0f;
-			const float NdcY = 1.0f - (LocalMousePos.Y / ViewportSize.y) * 2.0f;
+			const FVector2 LocalMousePos(IO.MousePos.x - CachedViewportOrigin.x, IO.MousePos.y - CachedViewportOrigin.y);
+			const float NdcX = (LocalMousePos.X / CachedViewportSize.x) * 2.0f - 1.0f;
+			const float NdcY = 1.0f - (LocalMousePos.Y / CachedViewportSize.y) * 2.0f;
 
 			const FMatrix InvViewProj = ViewProj.Inverse();
 			FVector4 NearClip = InvViewProj.TransformFVector4(FVector4(NdcX, NdcY, 0.0f, 1.0f));
@@ -1234,8 +1251,8 @@ void FSkeletalMeshViewerPanel::DrawSkeletonOverlay(const ImVec2& ViewportOrigin,
 				MouseRay,
 				LocalMousePos,
 				ViewProj,
-				static_cast<int>(ViewportSize.x),
-				static_cast<int>(ViewportSize.y),
+				static_cast<int>(CachedViewportSize.x),
+				static_cast<int>(CachedViewportSize.y),
 				bLeftMouseDown,
 				CachedCameraLocation,
 				false);
@@ -1256,7 +1273,6 @@ void FSkeletalMeshViewerPanel::DrawSkeletonOverlay(const ImVec2& ViewportOrigin,
 					ParentRotMat.SetAxis(1, FVector(ParentWorldMat.M[1][0], ParentWorldMat.M[1][1], ParentWorldMat.M[1][2]).GetSafeNormal());
 					ParentRotMat.SetAxis(2, FVector(ParentWorldMat.M[2][0], ParentWorldMat.M[2][1], ParentWorldMat.M[2][2]).GetSafeNormal());
 
-					// 행벡터 규약에서 월드 회전에 부모 회전의 전치 행렬을 곱하면 로컬 회전이 된다.
 					const FMatrix NewLocalRotMat = NewWorldRotMat * ParentRotMat.GetTransposed();
 					NewLocalTf.Rotation = MatrixToRotator(NewLocalRotMat);
 				}
@@ -1282,7 +1298,7 @@ void FSkeletalMeshViewerPanel::DrawSkeletonOverlay(const ImVec2& ViewportOrigin,
 		BoneGizmo.SetTarget(nullptr, false);
 	}
 
-	auto ProjectPoint = [&](const FVector& WorldPos, ImVec2& OutScreen, float& OutDepth) -> bool
+	auto ProjectPoint = [&](const FVector& WorldPos, ImVec2& OutScreen) -> bool
 	{
 		const FVector4 Clip = ViewProj.TransformFVector4(FVector4(WorldPos.X, WorldPos.Y, WorldPos.Z, 1.0f));
 		if (Clip.W <= 0.1f)
@@ -1292,27 +1308,20 @@ void FSkeletalMeshViewerPanel::DrawSkeletonOverlay(const ImVec2& ViewportOrigin,
 		const float NdcX = Clip.X * InvW;
 		const float NdcY = Clip.Y * InvW;
 
-		OutScreen.x = ViewportOrigin.x + (NdcX * 0.5f + 0.5f) * ViewportSize.x;
-		OutScreen.y = ViewportOrigin.y + (1.0f - (NdcY * 0.5f + 0.5f)) * ViewportSize.y;
-		OutDepth = Clip.W;
+		OutScreen.x = CachedViewportOrigin.x + (NdcX * 0.5f + 0.5f) * CachedViewportSize.x;
+		OutScreen.y = CachedViewportOrigin.y + (1.0f - (NdcY * 0.5f + 0.5f)) * CachedViewportSize.y;
 		return true;
 	};
 
-	TArray<FVector> BonePositions;
 	TArray<ImVec2> BoneScreenPts;
-	TArray<float> BoneDepths;
 	TArray<uint8> BoneInFront;
-
-	BonePositions.SetNum(NumBones);
 	BoneScreenPts.SetNum(NumBones);
-	BoneDepths.SetNum(NumBones);
 	BoneInFront.SetNum(NumBones);
-
 	for (int32 i = 0; i < NumBones; ++i)
 	{
 		const FMatrix& Mat = BoneMatrices[i];
-		BonePositions[i] = FVector(Mat.M[3][0], Mat.M[3][1], Mat.M[3][2]);
-		BoneInFront[i] = ProjectPoint(BonePositions[i], BoneScreenPts[i], BoneDepths[i]) ? 1 : 0;
+		const FVector Pos(Mat.M[3][0], Mat.M[3][1], Mat.M[3][2]);
+		BoneInFront[i] = ProjectPoint(Pos, BoneScreenPts[i]) ? 1 : 0;
 	}
 
 	// 뷰포트 마우스 호버 및 좌클릭 본 피킹 (기즈모 조작 중이 아닐 때만 수행)
@@ -1320,7 +1329,7 @@ void FSkeletalMeshViewerPanel::DrawSkeletonOverlay(const ImVec2& ViewportOrigin,
 	if (bViewportHovered && !bCameraManipulating && !bGizmoBlocksPick && bShowBones)
 	{
 		const FVector2 MousePt(IO.MousePos.x, IO.MousePos.y);
-		float BestJointScore = 14.0f; // 관절 포인트 피킹 반경(px)
+		float BestJointScore = 14.0f;
 		int32 BestJointBone = -1;
 
 		for (int32 i = 0; i < NumBones; ++i)
@@ -1344,7 +1353,6 @@ void FSkeletalMeshViewerPanel::DrawSkeletonOverlay(const ImVec2& ViewportOrigin,
 		}
 		else
 		{
-			// 관절 점에 직접 안 닿았으면 부모-자식 본 선분(원뿔 몸통) 피킹 검사
 			float BestSegDist = 9.0f;
 			int32 BestSegBone = -1;
 			for (int32 i = 0; i < NumBones; ++i)
@@ -1361,7 +1369,7 @@ void FSkeletalMeshViewerPanel::DrawSkeletonOverlay(const ImVec2& ViewportOrigin,
 				if (SegDist < BestSegDist)
 				{
 					BestSegDist = SegDist;
-					BestSegBone = ParentIdx; // 부모->자식 원뿔은 부모 본에서 뻗어나오므로 부모 본 선택
+					BestSegBone = ParentIdx;
 				}
 			}
 			HoveredBoneIndex = BestSegBone;
@@ -1376,9 +1384,318 @@ void FSkeletalMeshViewerPanel::DrawSkeletonOverlay(const ImVec2& ViewportOrigin,
 			}
 		}
 	}
+}
+
+void FSkeletalMeshViewerPanel::Render3DBones(const FMatrix& ViewProj)
+{
+	if (!bShowBones || !SelectedMesh)
+		return;
+
+	if (!BoneMesh)
+	{
+		BoneMesh = UAssetManager::GetAssetByPath<UStaticMesh>("OctahedralBone");
+	}
+	if (!BoneSphereMesh)
+	{
+		BoneSphereMesh = UAssetManager::GetAssetByPath<UStaticMesh>("GizmoSphere");
+	}
+	if (!BoneCB)
+	{
+		BoneCB = RenderCommand::CreateConstantBuffer(sizeof(FGizmoData));
+	}
+	if (!BoneShader)
+	{
+		BoneShader = FRenderResourceManager::GetShaderProgram("Resources/Shader/GizmoShader.hlsl");
+		BonePipelineState.Shader = BoneShader;
+		BonePipelineState.Topology = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	}
+
+	if (!BoneMesh || !BoneCB || !BoneShader)
+		return;
+
+	const TArray<FSkeletalBone>& Bones = SelectedMesh->MeshData.Bones;
+	const int32 NumBones = Bones.Num();
+	if (NumBones == 0)
+		return;
+
+	TArray<FMatrix> BoneMatrices;
+	ComputeBoneWorldMatrices(BoneMatrices);
+	if (BoneMatrices.Num() != NumBones)
+		return;
+
+	// 뼈대가 캐릭터 메쉬 안쪽에 파묻히지 않도록 깊이 버퍼를 클리어하고, 뼈대들끼리는 서로 깊이 판정(Z-Test) 수행
+	RenderCommand::ClearDepthStencil(RenderingInfo.DepthStencil.Texture);
+	RenderCommand::BindPipelineState(BonePipelineState);
+
+	// 1. 본 바디(입체 사각뿔 / 팔면체) 렌더링
+	if (bDrawBoneCones)
+	{
+		// 1-1. 반투명 채우기 (Alpha Blend Pass)
+		RenderCommand::SetBlendState(EBlendState::AlphaBlend);
+		RenderCommand::SetDepthStencilState(EDepthStencilState::Default);
+		RenderCommand::SetRasterizerState(ERasterizerState::SolidNone);
+		RenderCommand::BindMesh(BoneMesh);
+
+		for (int32 i = 0; i < NumBones; ++i)
+		{
+			const int32 ParentIdx = Bones[i].ParentIndex;
+			if (ParentIdx < 0 || ParentIdx >= NumBones)
+				continue;
+
+			const FVector P0(BoneMatrices[ParentIdx].M[3][0], BoneMatrices[ParentIdx].M[3][1], BoneMatrices[ParentIdx].M[3][2]);
+			const FVector P1(BoneMatrices[i].M[3][0], BoneMatrices[i].M[3][1], BoneMatrices[i].M[3][2]);
+			const FVector Diff = P1 - P0;
+			const float BoneLength = Diff.Length();
+			if (BoneLength <= 0.001f)
+				continue;
+
+			const FVector Dir = Diff / BoneLength;
+			const FVector RefAxis = (std::abs(Dir.Z) < 0.9f) ? FVector(0.0f, 0.0f, 1.0f) : FVector(1.0f, 0.0f, 0.0f);
+			const FVector SideA = Dir.Cross(RefAxis).GetSafeNormal();
+			const FVector SideB = SideA.Cross(Dir).GetSafeNormal();
+			const float Radius = BoneLength * BoneConeWidthRatio;
+
+			FMatrix BoneWorld = FMatrix::Identity;
+			BoneWorld.SetAxis(0, SideA * Radius);
+			BoneWorld.SetAxis(1, SideB * Radius);
+			BoneWorld.SetAxis(2, Dir * BoneLength);
+			BoneWorld.M[3][0] = P0.X;
+			BoneWorld.M[3][1] = P0.Y;
+			BoneWorld.M[3][2] = P0.Z;
+
+			const bool bIsIncomingToSelected = (i == SelectedBoneIndex);
+			const bool bIsOutgoingFromSelected = (ParentIdx == SelectedBoneIndex);
+			const bool bIsHovered = (i == HoveredBoneIndex || ParentIdx == HoveredBoneIndex);
+
+			FVector4 FillColor = FVector4(0.25f, 0.75f, 0.98f, 0.30f);
+			if (bIsIncomingToSelected)
+				FillColor = FVector4(1.0f, 0.57f, 0.0f, 0.55f);
+			else if (bIsOutgoingFromSelected)
+				FillColor = FVector4(1.0f, 0.45f, 0.08f, 0.50f);
+			else if (bIsHovered)
+				FillColor = FVector4(1.0f, 0.95f, 0.45f, 0.40f);
+
+			FGizmoData Data{};
+			Data.World = BoneWorld;
+			Data.ViewProj = ViewProj;
+			Data.Color = FillColor;
+			RenderCommand::UpdateBufferData(BoneCB.get(), &Data, sizeof(FGizmoData));
+			RenderCommand::BindConstantBuffer(0, BoneCB.get(), EShaderBindFlagBits::Vertex);
+			RenderCommand::DrawIndexed(BoneMesh->IndexBuffer->GetIndexCount());
+		}
+
+		// 1-2. 모서리 외곽선 와이어프레임 (Wireframe Pass)
+		RenderCommand::SetRasterizerState(ERasterizerState::Wireframe);
+		for (int32 i = 0; i < NumBones; ++i)
+		{
+			const int32 ParentIdx = Bones[i].ParentIndex;
+			if (ParentIdx < 0 || ParentIdx >= NumBones)
+				continue;
+
+			const FVector P0(BoneMatrices[ParentIdx].M[3][0], BoneMatrices[ParentIdx].M[3][1], BoneMatrices[ParentIdx].M[3][2]);
+			const FVector P1(BoneMatrices[i].M[3][0], BoneMatrices[i].M[3][1], BoneMatrices[i].M[3][2]);
+			const FVector Diff = P1 - P0;
+			const float BoneLength = Diff.Length();
+			if (BoneLength <= 0.001f)
+				continue;
+
+			const FVector Dir = Diff / BoneLength;
+			const FVector RefAxis = (std::abs(Dir.Z) < 0.9f) ? FVector(0.0f, 0.0f, 1.0f) : FVector(1.0f, 0.0f, 0.0f);
+			const FVector SideA = Dir.Cross(RefAxis).GetSafeNormal();
+			const FVector SideB = SideA.Cross(Dir).GetSafeNormal();
+			const float Radius = BoneLength * BoneConeWidthRatio;
+
+			FMatrix BoneWorld = FMatrix::Identity;
+			BoneWorld.SetAxis(0, SideA * Radius);
+			BoneWorld.SetAxis(1, SideB * Radius);
+			BoneWorld.SetAxis(2, Dir * BoneLength);
+			BoneWorld.M[3][0] = P0.X;
+			BoneWorld.M[3][1] = P0.Y;
+			BoneWorld.M[3][2] = P0.Z;
+
+			const bool bIsIncomingToSelected = (i == SelectedBoneIndex);
+			const bool bIsOutgoingFromSelected = (ParentIdx == SelectedBoneIndex);
+			const bool bIsHovered = (i == HoveredBoneIndex || ParentIdx == HoveredBoneIndex);
+
+			FVector4 WireColor = FVector4(0.37f, 0.85f, 1.0f, 0.90f);
+			if (bIsIncomingToSelected)
+				WireColor = FVector4(1.0f, 0.88f, 0.15f, 1.0f);
+			else if (bIsOutgoingFromSelected)
+				WireColor = FVector4(1.0f, 0.76f, 0.12f, 1.0f);
+			else if (bIsHovered)
+				WireColor = FVector4(1.0f, 0.96f, 0.55f, 0.95f);
+
+			FGizmoData Data{};
+			Data.World = BoneWorld;
+			Data.ViewProj = ViewProj;
+			Data.Color = WireColor;
+			RenderCommand::UpdateBufferData(BoneCB.get(), &Data, sizeof(FGizmoData));
+			RenderCommand::BindConstantBuffer(0, BoneCB.get(), EShaderBindFlagBits::Vertex);
+			RenderCommand::DrawIndexed(BoneMesh->IndexBuffer->GetIndexCount());
+		}
+	}
+	else
+	{
+		// 1-3. 선 모드 (Line Mode)일 때 얇은 와이어프레임 본 렌더링
+		RenderCommand::SetBlendState(EBlendState::Opaque);
+		RenderCommand::SetDepthStencilState(EDepthStencilState::Default);
+		RenderCommand::SetRasterizerState(ERasterizerState::Wireframe);
+		RenderCommand::BindMesh(BoneMesh);
+
+		for (int32 i = 0; i < NumBones; ++i)
+		{
+			const int32 ParentIdx = Bones[i].ParentIndex;
+			if (ParentIdx < 0 || ParentIdx >= NumBones)
+				continue;
+
+			const FVector P0(BoneMatrices[ParentIdx].M[3][0], BoneMatrices[ParentIdx].M[3][1], BoneMatrices[ParentIdx].M[3][2]);
+			const FVector P1(BoneMatrices[i].M[3][0], BoneMatrices[i].M[3][1], BoneMatrices[i].M[3][2]);
+			const FVector Diff = P1 - P0;
+			const float BoneLength = Diff.Length();
+			if (BoneLength <= 0.001f)
+				continue;
+
+			const FVector Dir = Diff / BoneLength;
+			const FVector RefAxis = (std::abs(Dir.Z) < 0.9f) ? FVector(0.0f, 0.0f, 1.0f) : FVector(1.0f, 0.0f, 0.0f);
+			const FVector SideA = Dir.Cross(RefAxis).GetSafeNormal();
+			const FVector SideB = SideA.Cross(Dir).GetSafeNormal();
+			const float Radius = BoneLength * 0.012f;
+
+			FMatrix BoneWorld = FMatrix::Identity;
+			BoneWorld.SetAxis(0, SideA * Radius);
+			BoneWorld.SetAxis(1, SideB * Radius);
+			BoneWorld.SetAxis(2, Dir * BoneLength);
+			BoneWorld.M[3][0] = P0.X;
+			BoneWorld.M[3][1] = P0.Y;
+			BoneWorld.M[3][2] = P0.Z;
+
+			const bool bIsIncomingToSelected = (i == SelectedBoneIndex);
+			const bool bIsOutgoingFromSelected = (ParentIdx == SelectedBoneIndex);
+			const bool bIsHovered = (i == HoveredBoneIndex || ParentIdx == HoveredBoneIndex);
+
+			FVector4 WireColor = FVector4(0.37f, 0.85f, 1.0f, 0.90f);
+			if (bIsIncomingToSelected)
+				WireColor = FVector4(1.0f, 0.88f, 0.15f, 1.0f);
+			else if (bIsOutgoingFromSelected)
+				WireColor = FVector4(1.0f, 0.76f, 0.12f, 1.0f);
+			else if (bIsHovered)
+				WireColor = FVector4(1.0f, 0.96f, 0.55f, 0.95f);
+
+			FGizmoData Data{};
+			Data.World = BoneWorld;
+			Data.ViewProj = ViewProj;
+			Data.Color = WireColor;
+			RenderCommand::UpdateBufferData(BoneCB.get(), &Data, sizeof(FGizmoData));
+			RenderCommand::BindConstantBuffer(0, BoneCB.get(), EShaderBindFlagBits::Vertex);
+			RenderCommand::DrawIndexed(BoneMesh->IndexBuffer->GetIndexCount());
+		}
+	}
+
+	// 2. 조인트 구(Sphere) 렌더링
+	if (BoneSphereMesh && BoneJointRadius > 0.01f)
+	{
+		RenderCommand::SetBlendState(EBlendState::AlphaBlend);
+		RenderCommand::SetDepthStencilState(EDepthStencilState::Default);
+		RenderCommand::SetRasterizerState(ERasterizerState::SolidNone);
+		RenderCommand::BindMesh(BoneSphereMesh);
+
+		// 모델 크기(MeshRadius)에 비례하도록 자동 정규화 (모델 크기의 약 0.5% ~ 1.0% 수준)
+		const float ModelScale = (MeshRadius > 0.001f) ? MeshRadius : 1.0f;
+		const float DesiredRadius = ModelScale * 0.0020f * BoneJointRadius;
+		const float BaseSphereRadius = 0.2f;
+		const float ScaleFactor = DesiredRadius / BaseSphereRadius;
+
+		for (int32 i = 0; i < NumBones; ++i)
+		{
+			const FVector Pos(BoneMatrices[i].M[3][0], BoneMatrices[i].M[3][1], BoneMatrices[i].M[3][2]);
+			const bool bIsSelected = (i == SelectedBoneIndex);
+			const bool bIsHovered = (i == HoveredBoneIndex);
+			const bool bIsRoot = (Bones[i].ParentIndex == -1);
+
+			float CurScale = ScaleFactor;
+			FVector4 SphereColor = FVector4(0.70f, 0.90f, 1.0f, 0.85f);
+			if (bIsSelected)
+			{
+				CurScale *= 1.35f;
+				SphereColor = FVector4(1.0f, 0.55f, 0.0f, 0.95f);
+			}
+			else if (bIsHovered)
+			{
+				CurScale *= 1.20f;
+				SphereColor = FVector4(1.0f, 0.95f, 0.4f, 0.90f);
+			}
+			else if (bIsRoot)
+			{
+				SphereColor = FVector4(1.0f, 0.35f, 0.35f, 0.90f);
+			}
+
+			FMatrix SphereWorld = FMatrix::Identity;
+			SphereWorld.M[0][0] = SphereWorld.M[1][1] = SphereWorld.M[2][2] = CurScale;
+			SphereWorld.M[3][0] = Pos.X;
+			SphereWorld.M[3][1] = Pos.Y;
+			SphereWorld.M[3][2] = Pos.Z;
+
+			FGizmoData Data{};
+			Data.World = SphereWorld;
+			Data.ViewProj = ViewProj;
+			Data.Color = SphereColor;
+			RenderCommand::UpdateBufferData(BoneCB.get(), &Data, sizeof(FGizmoData));
+			RenderCommand::BindConstantBuffer(0, BoneCB.get(), EShaderBindFlagBits::Vertex);
+			RenderCommand::DrawIndexed(BoneSphereMesh->IndexBuffer->GetIndexCount());
+		}
+	}
+
+	// 렌더링 상태 복원
+	RenderCommand::SetBlendState(EBlendState::Opaque);
+	RenderCommand::SetRasterizerState(ERasterizerState::SolidBack);
+}
+
+void FSkeletalMeshViewerPanel::DrawSkeletonOverlay(const ImVec2& ViewportOrigin, const ImVec2& ViewportSize)
+{
+	if (!SelectedMesh || ViewportSize.x <= 1.0f || ViewportSize.y <= 1.0f)
+		return;
+
+	const TArray<FSkeletalBone>& Bones = SelectedMesh->MeshData.Bones;
+	const int32 NumBones = Bones.Num();
+	if (NumBones == 0)
+		return;
 
 	if (!bShowBones && SelectedBoneIndex < 0)
 		return;
+
+	TArray<FMatrix> BoneMatrices;
+	ComputeBoneWorldMatrices(BoneMatrices);
+	if (BoneMatrices.Num() != NumBones)
+		return;
+
+	const FMatrix ViewProj = CachedViewMatrix * CachedProjMatrix;
+
+	auto ProjectPoint = [&](const FVector& WorldPos, ImVec2& OutScreen) -> bool
+	{
+		const FVector4 Clip = ViewProj.TransformFVector4(FVector4(WorldPos.X, WorldPos.Y, WorldPos.Z, 1.0f));
+		if (Clip.W <= 0.1f)
+			return false;
+
+		const float InvW = 1.0f / Clip.W;
+		const float NdcX = Clip.X * InvW;
+		const float NdcY = Clip.Y * InvW;
+
+		OutScreen.x = ViewportOrigin.x + (NdcX * 0.5f + 0.5f) * ViewportSize.x;
+		OutScreen.y = ViewportOrigin.y + (1.0f - (NdcY * 0.5f + 0.5f)) * ViewportSize.y;
+		return true;
+	};
+
+	TArray<ImVec2> BoneScreenPts;
+	TArray<uint8> BoneInFront;
+	BoneScreenPts.SetNum(NumBones);
+	BoneInFront.SetNum(NumBones);
+
+	for (int32 i = 0; i < NumBones; ++i)
+	{
+		const FMatrix& Mat = BoneMatrices[i];
+		const FVector Pos(Mat.M[3][0], Mat.M[3][1], Mat.M[3][2]);
+		BoneInFront[i] = ProjectPoint(Pos, BoneScreenPts[i]) ? 1 : 0;
+	}
 
 	ImDrawList* DrawList = ImGui::GetWindowDrawList();
 	DrawList->PushClipRect(
@@ -1386,155 +1703,20 @@ void FSkeletalMeshViewerPanel::DrawSkeletonOverlay(const ImVec2& ViewportOrigin,
 		ImVec2(ViewportOrigin.x + ViewportSize.x, ViewportOrigin.y + ViewportSize.y),
 		true);
 
-	// 1. 부모-자식 본 간의 3D 원뿔(Cone/Octahedron) 또는 선(Line) 렌더링
-	for (int32 i = 0; i < NumBones; ++i)
+	// 1. 모든 본 이름 라벨 표시 (옵션 활성화 시)
+	if (bShowAllBoneNames)
 	{
-		const int32 ParentIdx = Bones[i].ParentIndex;
-		if (ParentIdx < 0 || ParentIdx >= NumBones)
-			continue;
-
-		const bool bIsIncomingToSelected = (i == SelectedBoneIndex);
-		const bool bIsOutgoingFromSelected = (ParentIdx == SelectedBoneIndex);
-		const bool bIsSelectedBoneLink = bIsIncomingToSelected || bIsOutgoingFromSelected;
-		const bool bIsHoveredBoneLink = (i == HoveredBoneIndex || ParentIdx == HoveredBoneIndex);
-
-		if (!bShowBones && !bIsSelectedBoneLink)
-			continue;
-
-		const FVector& P0 = BonePositions[ParentIdx];
-		const FVector& P1 = BonePositions[i];
-		const FVector Diff = P1 - P0;
-		const float BoneLength = Diff.Length();
-
-		ImU32 ConeFillColor = IM_COL32(65, 190, 250, 50);
-		ImU32 ConeWireColor = IM_COL32(95, 215, 255, 195);
-		float WireThickness = 1.25f;
-
-		if (bIsIncomingToSelected)
+		for (int32 i = 0; i < NumBones; ++i)
 		{
-			// 부모 -> 선택된 본 구간: 밝은 황금빛 주황색 하이라이트
-			ConeFillColor = IM_COL32(255, 145, 0, 125);
-			ConeWireColor = IM_COL32(255, 225, 40, 255);
-			WireThickness = 2.4f;
-		}
-		else if (bIsOutgoingFromSelected)
-		{
-			// 선택된 본 -> 자식 본 구간: 주황색 원뿔 하이라이트
-			ConeFillColor = IM_COL32(255, 115, 20, 115);
-			ConeWireColor = IM_COL32(255, 195, 30, 255);
-			WireThickness = 2.2f;
-		}
-		else if (bIsHoveredBoneLink)
-		{
-			ConeFillColor = IM_COL32(255, 240, 110, 90);
-			ConeWireColor = IM_COL32(255, 245, 140, 240);
-			WireThickness = 1.8f;
-		}
+			if (!BoneInFront[i] || i == SelectedBoneIndex)
+				continue;
 
-		if (bDrawBoneCones && BoneLength > 0.01f)
-		{
-			const FVector Dir = Diff / BoneLength;
-			const FVector RefAxis = (std::abs(Dir.Z) < 0.9f) ? FVector(0.0f, 0.0f, 1.0f) : FVector(1.0f, 0.0f, 0.0f);
-			const FVector SideA = Dir.Cross(RefAxis).GetSafeNormal();
-			const FVector SideB = SideA.Cross(Dir).GetSafeNormal();
-
-			const float Radius = BoneLength * BoneConeWidthRatio;
-			const FVector BaseCenter = P0 + Dir * (BoneLength * 0.16f);
-
-			const FVector Corners3D[4] = {
-				BaseCenter + (SideA + SideB) * (Radius * 0.7071f),
-				BaseCenter + (SideA - SideB) * (Radius * 0.7071f),
-				BaseCenter + (-SideA - SideB) * (Radius * 0.7071f),
-				BaseCenter + (-SideA + SideB) * (Radius * 0.7071f)
-			};
-
-			ImVec2 Corners2D[4];
-			float CornerDepths[4];
-			bool bAllCornersVisible = BoneInFront[ParentIdx] && BoneInFront[i];
-			for (int32 c = 0; c < 4 && bAllCornersVisible; ++c)
-			{
-				bAllCornersVisible = ProjectPoint(Corners3D[c], Corners2D[c], CornerDepths[c]);
-			}
-
-			if (bAllCornersVisible)
-			{
-				const ImVec2& S0 = BoneScreenPts[ParentIdx];
-				const ImVec2& S1 = BoneScreenPts[i];
-
-				// 반투명 원뿔(피라미드) 면 채우기
-				for (int32 c = 0; c < 4; ++c)
-				{
-					const int32 NextC = (c + 1) % 4;
-					DrawList->AddTriangleFilled(S0, Corners2D[c], Corners2D[NextC], ConeFillColor);
-					DrawList->AddTriangleFilled(Corners2D[c], Corners2D[NextC], S1, ConeFillColor);
-				}
-
-				// 원뿔 모서리 와이어프레임
-				for (int32 c = 0; c < 4; ++c)
-				{
-					const int32 NextC = (c + 1) % 4;
-					DrawList->AddLine(S0, Corners2D[c], ConeWireColor, WireThickness);
-					DrawList->AddLine(Corners2D[c], S1, ConeWireColor, WireThickness);
-					DrawList->AddLine(Corners2D[c], Corners2D[NextC], ConeWireColor, WireThickness * 0.85f);
-				}
-			}
-			else if (BoneInFront[ParentIdx] && BoneInFront[i])
-			{
-				DrawList->AddLine(BoneScreenPts[ParentIdx], BoneScreenPts[i], ConeWireColor, WireThickness);
-			}
-		}
-		else if (BoneInFront[ParentIdx] && BoneInFront[i])
-		{
-			// 선 표시 모드
-			DrawList->AddLine(BoneScreenPts[ParentIdx], BoneScreenPts[i], ConeWireColor, WireThickness + 0.6f);
-		}
-	}
-
-	// 2. 각 본 관절(Joint) 원 및 이름 라벨 렌더링
-	for (int32 i = 0; i < NumBones; ++i)
-	{
-		if (!BoneInFront[i])
-			continue;
-
-		const bool bIsSelected = (i == SelectedBoneIndex);
-		const bool bIsHovered = (i == HoveredBoneIndex);
-		const bool bIsRoot = (Bones[i].ParentIndex == -1);
-
-		if (!bShowBones && !bIsSelected)
-			continue;
-
-		const ImVec2& Pt = BoneScreenPts[i];
-
-		if (bIsSelected)
-		{
-			// 선택된 본 관절: 외곽 글로우 링 + 선명한 주황/노란색 코어
-			DrawList->AddCircle(Pt, BoneJointRadius + 5.5f, IM_COL32(255, 220, 40, 255), 20, 2.2f);
-			DrawList->AddCircleFilled(Pt, BoneJointRadius + 2.2f, IM_COL32(255, 130, 0, 255), 16);
-			DrawList->AddCircle(Pt, BoneJointRadius + 2.2f, IM_COL32(255, 255, 255, 240), 16, 1.2f);
-		}
-		else if (bIsHovered)
-		{
-			DrawList->AddCircleFilled(Pt, BoneJointRadius + 1.8f, IM_COL32(255, 240, 110, 255), 14);
-			DrawList->AddCircle(Pt, BoneJointRadius + 2.8f, IM_COL32(255, 255, 255, 220), 14, 1.5f);
-		}
-		else if (bIsRoot)
-		{
-			DrawList->AddCircleFilled(Pt, BoneJointRadius + 1.0f, IM_COL32(255, 95, 95, 235), 12);
-			DrawList->AddCircle(Pt, BoneJointRadius + 1.0f, IM_COL32(30, 10, 10, 220), 12, 1.2f);
-		}
-		else
-		{
-			DrawList->AddCircleFilled(Pt, BoneJointRadius, IM_COL32(190, 235, 255, 220), 12);
-			DrawList->AddCircle(Pt, BoneJointRadius, IM_COL32(15, 45, 70, 210), 12, 1.0f);
-		}
-
-		if (bShowAllBoneNames && !bIsSelected)
-		{
+			const ImVec2& Pt = BoneScreenPts[i];
 			DrawList->AddText(ImVec2(Pt.x + 6.0f, Pt.y - 6.0f), IM_COL32(215, 230, 245, 210), Bones[i].Name.c_str());
 		}
 	}
 
-	// 3. 선택된 본의 이름 태그 오버레이 표시 (좌표축은 실제 3D 에디터 기즈모로 렌더링됨)
+	// 2. 선택된 본의 이름 태그 오버레이 표시
 	if (SelectedBoneIndex >= 0 && SelectedBoneIndex < NumBones && BoneInFront[SelectedBoneIndex])
 	{
 		const ImVec2& SelScreen = BoneScreenPts[SelectedBoneIndex];
@@ -2072,7 +2254,7 @@ void FSkeletalMeshViewerPanel::DrawLightingSettingsUI()
 		{
 			ImGui::SliderFloat("Cone Width Ratio", &BoneConeWidthRatio, 0.03f, 0.30f, "%.2f");
 		}
-		ImGui::SliderFloat("Joint Circle Size", &BoneJointRadius, 2.0f, 10.0f, "%.1f px");
+		ImGui::SliderFloat("Joint Sphere Size", &BoneJointRadius, 0.0f, 10.0f, "%.1f");
 	}
 
 	if (ImGui::CollapsingHeader("Directional Light", ImGuiTreeNodeFlags_DefaultOpen))

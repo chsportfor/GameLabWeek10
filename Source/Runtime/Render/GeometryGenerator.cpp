@@ -476,6 +476,40 @@ FStaticMeshData* FGeometryGenerator::GetMeshData(const FString& InName)
 	return nullptr;
 }
 
+TUniquePtr<FStaticMeshData> FGeometryGenerator::CreateOctahedralBone(float Width, float Length, float HeadRatio, const FVector4& Color)
+{
+	TUniquePtr<FStaticMeshData> BoneData = MakeUnique<FStaticMeshData>();
+	TArray<FVertex>& Vertices = BoneData->Vertices;
+	TArray<uint32>& Indices = BoneData->Indices;
+
+	const float HeadZ = Length * HeadRatio;
+	const float C = 0.70710678f * (Width * 0.5f);
+
+	// 정점 6개: 부모 꼭짓점(0,0,0), 밑면 코너 4개, 자식 꼭짓점(0,0,Length)
+	Vertices.Add({ FVector(0.0f, 0.0f, 0.0f), FVector(0.0f, 0.0f, -1.0f), FVector4(1.0f, 0.0f, 0.0f, 1.0f), FVector2(0.5f, 0.0f), Color });
+	Vertices.Add({ FVector( C,  C, HeadZ),   FVector(1.0f, 1.0f, 0.0f).GetSafeNormal(), FVector4(1.0f, 0.0f, 0.0f, 1.0f), FVector2(1.0f, 0.5f), Color });
+	Vertices.Add({ FVector(-C,  C, HeadZ),   FVector(-1.0f, 1.0f, 0.0f).GetSafeNormal(), FVector4(1.0f, 0.0f, 0.0f, 1.0f), FVector2(0.0f, 0.5f), Color });
+	Vertices.Add({ FVector(-C, -C, HeadZ),   FVector(-1.0f, -1.0f, 0.0f).GetSafeNormal(), FVector4(1.0f, 0.0f, 0.0f, 1.0f), FVector2(0.0f, 0.5f), Color });
+	Vertices.Add({ FVector( C, -C, HeadZ),   FVector(1.0f, -1.0f, 0.0f).GetSafeNormal(), FVector4(1.0f, 0.0f, 0.0f, 1.0f), FVector2(1.0f, 0.5f), Color });
+	Vertices.Add({ FVector(0.0f, 0.0f, Length), FVector(0.0f, 0.0f, 1.0f), FVector4(1.0f, 0.0f, 0.0f, 1.0f), FVector2(0.5f, 1.0f), Color });
+
+	// 부모 쪽 짧은 사각뿔 (삼각형 4개)
+	Indices.Add(0); Indices.Add(2); Indices.Add(1);
+	Indices.Add(0); Indices.Add(3); Indices.Add(2);
+	Indices.Add(0); Indices.Add(4); Indices.Add(3);
+	Indices.Add(0); Indices.Add(1); Indices.Add(4);
+
+	// 자식 쪽 긴 사각뿔 (삼각형 4개)
+	Indices.Add(5); Indices.Add(1); Indices.Add(2);
+	Indices.Add(5); Indices.Add(2); Indices.Add(3);
+	Indices.Add(5); Indices.Add(3); Indices.Add(4);
+	Indices.Add(5); Indices.Add(4); Indices.Add(1);
+
+	CalculateNormals(Vertices, Indices);
+	BoneData->AABB = CalculateAABB(Vertices);
+	return BoneData;
+}
+
 void FGeometryGenerator::CreateDefaultMeshDatas()
 {
 	MeshDataMap["Cone"] = CreateCone(1.0f, 1.0f, 20, FVector4(1.0f, 1.0f, 1.0f, 1.0f));
@@ -487,4 +521,5 @@ void FGeometryGenerator::CreateDefaultMeshDatas()
 	MeshDataMap["Ring"] = CreateRing(1.0f, 0.03f, 32, 16, FVector4(1.0f, 0.0f, 0.0f, 1.0f));
 	MeshDataMap["ScaleBar"] = CreateScaleBar(0.1f, 1.0f, 0.4f, 20, FVector4(1.0f, 0.0f, 0.0f, 1.0f));
 	MeshDataMap["GizmoSphere"] = CreateSphere(0.2f, 100, 50, FVector4(1.0f, 1.0f, 1.0f, 1.0f));
+	MeshDataMap["OctahedralBone"] = CreateOctahedralBone(2.0f, 1.0f, 0.16f, FVector4(1.0f, 1.0f, 1.0f, 1.0f));
 }

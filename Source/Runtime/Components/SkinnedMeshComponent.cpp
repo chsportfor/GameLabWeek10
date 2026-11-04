@@ -135,45 +135,50 @@ void USkinnedMeshComponent::UpdateSkinning()
 		const uint32 BaseVertex = static_cast<uint32>(ResultVertex.Num());
 		const TArray<FMatrix>& InvBindArray = Mesh.InverseBindPoseMat;
 		const FMatrix MeshNormalMatrix = Mesh.MeshTransform.Inverse().GetTransposed();
-		for (int j = 0; j < SkeletalMesh->MeshData.Meshes[i].Vertices.Num(); j++)
+		// 본별 SkinMatrix 및 NormalMatrix를 미리 1회만 계산 (정점마다 역행렬 4회 계산하던 병목 완전 제거)
+		const int32 NumInvBones = static_cast<int32>(InvBindArray.Num());
+		TArray<FMatrix> SkinMatrices;
+		TArray<FMatrix> NormalMatrices;
+		SkinMatrices.SetNum(NumInvBones);
+		NormalMatrices.SetNum(NumInvBones);
+		for (int32 b = 0; b < NumInvBones; ++b)
 		{
-			TArray<FVector> SkinPos;
-			TArray<FVector> SkinNormal;
-			TArray<FVector> SkinTangent;
-			FVector ResultPos;
-			FVector ResultNormal;
-			float TotalWeight = 0.0f;
-			FVertex Vertex = SkeletalMesh->MeshData.Meshes[i].Vertices[j].Vertex;
-			for (int k = 0; k < 4; k++)
+			if (b < CurrentGlobalMatrices.Num())
 			{
-				uint32 BoneIndex = SkeletalMesh->MeshData.Meshes[i].Vertices[j].BoneIndices[k];
-				float BoneWeight = SkeletalMesh->MeshData.Meshes[i].Vertices[j].BoneWeights[k];
-				if (BoneWeight <= 0.0f || BoneIndex >= static_cast<uint32>(CurrentGlobalMatrices.Num())
-					|| BoneIndex >= static_cast<uint32>(InvBindArray.Num()))
-				{
-					SkinPos.Add(FVector::ZeroVector);
-					SkinNormal.Add(FVector::ZeroVector);
-					continue;
-				}
-				// 렌더링, 피킹, 외곽선이 모두 컴포넌트 로컬 공간의 스키닝 정점을 사용한다.
-				const FMatrix SkinMatrix = InvBindArray[BoneIndex] * CurrentGlobalMatrices[BoneIndex];
-				FMatrix NormalMatrix = SkinMatrix.Inverse().GetTransposed();		// Normal의 경우는 NormalMap 적용처럼 Scale 변환 시 왜곡될수 있으므로 역전치 적용해야 함
-				FVector SkinnedPosition = SkinMatrix.TransformPosition(Vertex.Position);
-				FVector SkinnedNormal = NormalMatrix.TransformVector(Vertex.Normal);
-				SkinPos.Add(SkinnedPosition);
-				SkinNormal.Add(SkinnedNormal);
-
+				SkinMatrices[b] = InvBindArray[b] * CurrentGlobalMatrices[b];
+				NormalMatrices[b] = SkinMatrices[b].Inverse().GetTransposed();
 			}
+			else
+			{
+				SkinMatrices[b] = FMatrix::Identity;
+				NormalMatrices[b] = FMatrix::Identity;
+			}
+		}
+
+		const int32 NumVerts = Mesh.Vertices.Num();
+		for (int j = 0; j < NumVerts; j++)
+		{
+			FVector ResultPos = FVector::ZeroVector;
+			FVector ResultNormal = FVector::ZeroVector;
+			float TotalWeight = 0.0f;
+			FVertex Vertex = Mesh.Vertices[j].Vertex;
+			const auto& SkinnedVert = Mesh.Vertices[j];
+
 			for (int k = 0; k < 4; k++)
 			{
-				uint32 BoneIndex = SkeletalMesh->MeshData.Meshes[i].Vertices[j].BoneIndices[k];
-				float BoneWeight = SkeletalMesh->MeshData.Meshes[i].Vertices[j].BoneWeights[k];
-				if (BoneWeight <= 0.0f || BoneIndex >= static_cast<uint32>(CurrentGlobalMatrices.Num())
-					|| BoneIndex >= static_cast<uint32>(InvBindArray.Num())) continue;
-				ResultPos += (SkinPos[k] * BoneWeight);
-				ResultNormal += (SkinNormal[k] * BoneWeight);
+				const float BoneWeight = SkinnedVert.BoneWeights[k];
+				if (BoneWeight <= 0.0f)
+					continue;
+
+				const uint32 BoneIndex = SkinnedVert.BoneIndices[k];
+				if (BoneIndex >= static_cast<uint32>(NumInvBones) || BoneIndex >= static_cast<uint32>(CurrentGlobalMatrices.Num()))
+					continue;
+
+				ResultPos += SkinMatrices[BoneIndex].TransformPosition(Vertex.Position) * BoneWeight;
+				ResultNormal += NormalMatrices[BoneIndex].TransformVector(Vertex.Normal) * BoneWeight;
 				TotalWeight += BoneWeight;
 			}
+
 			if (TotalWeight > 0.0f)
 			{
 				Vertex.Position = ResultPos / TotalWeight;
