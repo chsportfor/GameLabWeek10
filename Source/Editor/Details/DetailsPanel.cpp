@@ -213,6 +213,54 @@ namespace
 		ImGui::PopID();
 	}
 
+	bool DrawTextureProperty(UTexture2D** TexturePtr)
+	{
+		const float ThumbnailSize = 64.0f;
+		bool bChanged = false;
+
+		UTexture2D* Texture = *TexturePtr;
+
+		ImGui::PushID(TexturePtr);
+
+		if (Texture && Texture->GetResource())
+		{
+			ImGui::Image(
+				(ImTextureID)Texture->GetResource()->GetSRV(),
+				{ ThumbnailSize, ThumbnailSize });
+		}
+		else
+		{
+			ImGui::Button("Empty", { ThumbnailSize, ThumbnailSize });
+		}
+
+		if (ImGui::BeginDragDropTarget())
+		{
+			if (const ImGuiPayload* Payload = ImGui::AcceptDragDropPayload(EditorDragDrop::Texture))
+			{
+				Texture = *static_cast<UTexture2D**>(Payload->Data);
+				*TexturePtr = Texture;
+				bChanged = true;
+			}
+			ImGui::EndDragDropTarget();
+		}
+
+		ImGui::SameLine();
+
+		ImGui::BeginGroup();
+		if (Texture)
+		{
+			ImGui::TextWrapped("%s", Texture->GetPath().c_str());
+		}
+		else
+		{
+			ImGui::TextDisabled("(비어 있음)");
+		}
+		ImGui::EndGroup();
+
+		ImGui::PopID();
+		return bChanged;
+	}
+
 	FString GetAssetDisplayName(const FString& Path)
 	{
 		if (Path.find("#Static/") != FString::npos)
@@ -940,6 +988,10 @@ namespace
 			{
 				DrawTextureSlot(reinterpret_cast<UMaterial**>(ObjPtr), 0);
 			}
+			else if (Property.Class == UTexture2D::StaticClass())
+			{
+				bChanged = DrawTextureProperty(reinterpret_cast<UTexture2D**>(ObjPtr));
+			}
 			else if (Property.Class == UFont::StaticClass())
 			{
 				DrawFontSlot(Object, reinterpret_cast<UFont**>(ObjPtr));
@@ -965,49 +1017,6 @@ namespace
 		}
 	}
 
-	void DrawSkinningTestActions(USkeletalMeshComponent& Component)
-	{
-		USkeletalMesh* Mesh = Component.GetSkeletalMesh();
-		if (!Mesh) return;
-		if (!ImGui::CollapsingHeader("CPU Skinning Test", ImGuiTreeNodeFlags_DefaultOpen)) return;
-
-		const auto& Bones = Mesh->MeshData.Bones;
-		int32 ForearmIndex = -1;
-		for (int32 BoneIndex = 0; BoneIndex < Bones.Num(); ++BoneIndex)
-		{
-			if (Bones[BoneIndex].Name == "forearm.L")
-			{
-				ForearmIndex = BoneIndex;
-				break;
-			}
-		}
-		if (ForearmIndex == -1)
-		{
-			ImGui::TextDisabled("Test bone 'forearm.L' not found. Select the lowpoly mesh.");
-			return;
-		}
-		const FTransform* CurrentPose = Component.GetBoneLocalTransform(ForearmIndex);
-		if (!CurrentPose)
-		{
-			ImGui::TextDisabled("Bone pose is not initialized. Reassign the skeletal mesh.");
-			return;
-		}
-
-		ImGui::TextUnformatted("Left forearm: forearm.L");
-		ImGui::Text("Local rotation: %.1f / %.1f / %.1f",
-			CurrentPose->Rotation.Pitch, CurrentPose->Rotation.Yaw, CurrentPose->Rotation.Roll);
-		// 매번 원본 Ref에서 시작하므로 같은 버튼을 반복해도 회전은 누적되지 않는다.
-		if (ImGui::Button("Forearm 30 deg"))
-		{
-			FTransform Pose = Bones[ForearmIndex].RefPoseTransform;
-			Pose.Rotation.Roll += 30.0f;
-			Component.SetBoneLocalTransform(ForearmIndex, Pose);
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("Reset Forearm"))
-			Component.SetBoneLocalTransform(ForearmIndex, Bones[ForearmIndex].RefPoseTransform);
-	}
-
 	// 클래스 계층을 따라 올라가며 각 단계의 프로퍼티를 표시
 	void DrawProperties(UObject* Object, ImFont* CustomFont)
 	{
@@ -1031,7 +1040,7 @@ namespace
 			bool bHasVisibleProperty = false;
 			for (const FProperty& Property : Class->GetProperties())
 			{
-				if (Property.HasAnyFlags(CPF_Edit))
+				if (Property.HasAnyFlags(CPF_Edit) && Object->IsPropertyVisibleInDetails(Property))
 				{
 					bHasVisibleProperty = true;
 					break;
@@ -1047,7 +1056,7 @@ namespace
 			{
 				for (const FProperty& Property : Class->GetProperties())
 				{
-					if (!Property.HasAnyFlags(CPF_Edit))
+					if (!Property.HasAnyFlags(CPF_Edit) || !Object->IsPropertyVisibleInDetails(Property))
 					{
 						continue;
 					}
@@ -1459,7 +1468,6 @@ void FDetailsPanel::OnRender()
 				USkeletalMesh* Mesh = SkeletalComponent->GetSkeletalMesh();
 				if (Mesh && OpenSkeletalMeshViewer && ImGui::Button("Edit Skeletal Mesh"))
 					OpenSkeletalMeshViewer(Mesh);
-				DrawSkinningTestActions(*SkeletalComponent);
 			}
 
 			if (UScriptComponent* ScriptComponent = Cast<UScriptComponent>(TargetComponent))

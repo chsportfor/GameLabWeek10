@@ -17,6 +17,7 @@
 #include "Render/DepthViewRenderer.h"
 #include "Render/FShadowViewRenderer.h"
 #include "Render/UIRenderer.h"
+#include "Render/DecalRenderer.h"
 
 
 #include "Editor/EditorUI/EditorUI.h"
@@ -117,7 +118,7 @@ private:
 	void EndFrame();
 
 	//불투명 물체에 대한 Pass
-	void RenderOpaquePass(int32 ViewIndex, const FRenderingInfo& ViewRenderingInfo,	const FViewConstants& ViewConstants, FRenderQueue& RenderQueue);
+	void RenderOpaquePass(int32 ViewIndex, const FRenderingInfo& ViewRenderingInfo,	const FViewConstants& ViewConstants, FRenderQueue& RenderQueue, UWorld& ViewWorld);
 	//안개에 대한 Pass
 	void RenderFogPass(const int32 ViewIndex, UWorld& ViewWorld, const FRenderingInfo& ViewRenderingInfo, const FVector& ViewCameraLocation,const FMatrix& ViewProjection, FRenderQueue& RenderQueue);
 	//Overlay Pass
@@ -154,6 +155,7 @@ private:
 	TUniquePtr<FGizmoRenderer> GizmoRenderer;
 	TUniquePtr<FTextRenderer> TextRenderer;
 	TUniquePtr<FFogRenderer> FogRenderer;
+	TUniquePtr<FDecalRenderer> DecalRenderer;
 	TUniquePtr<FLineBatcher> LineBatcher;
 	TUniquePtr<FGizmo> Gizmo;
 	TUniquePtr<FOutline> Outline;

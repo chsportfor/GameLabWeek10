@@ -5,6 +5,20 @@
 #include "Components/SpotLightComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/RectLightComponent.h"
+#include "Render/DecalSettings.h"
+#include "Core/Stats/DecalStats.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkinnedMeshComponent.h"
+
+// 투영 Decal이 찍힐 수 있는 Primitive인지 본다. 에디터 아이콘이나 Billboard가 움직여도 Decal을 다시 만들지 않는다.
+// 스켈레탈은 자세가 바뀌면 UpdateSkinning이 OnTransformDirty를 불러 여기를 거쳐 다시 잘린다.
+static bool CanReceiveProjectedDecal(const FPrimitiveSceneProxy* Proxy)
+{
+	if (Cast<USkinnedMeshComponent>(Proxy->GetComponent()))
+		return true;
+	const auto* StaticMeshComponent = Cast<UStaticMeshComponent>(Proxy->GetComponent());
+	return StaticMeshComponent && !StaticMeshComponent->IsEditorIcon();
+}
 
 void FScene::AddPrimitive(UPrimitiveComponent* Component)
 {
@@ -32,6 +46,10 @@ void FScene::RemovePrimitive(UPrimitiveComponent* Component)
 	if (!Proxy) return;
 
 	const uint32 Index = static_cast<uint32>(Proxy->PackedIndex);
+
+	// 지워진 메시 위에 찍혀 있던 투영 Decal을 다시 만들 수 있게 영역을 남긴다.
+	if (CanReceiveProjectedDecal(Proxy))
+		ChangedReceiverBounds.Add(PrimitiveBounds[Index]);
 
 	PrimitiveSceneProxies.RemoveAtSwap(Index);
 	PrimitiveBounds.RemoveAtSwap(Index);
@@ -74,6 +92,12 @@ void FScene::RemoveAllPrimitives()
 	RenderStateDirtyProxies.Reset();
 	BVH.Clear();
 	bElementListChanged = true;
+
+	ChangedReceiverBounds.Reset();
+	for (FDecalSceneProxy* Proxy : DecalSceneProxies)
+	{
+		Proxy->bProjectedMeshDirty = true;
+	}
 }
 
 void FScene::AddLight(ULightComponent* Component)
@@ -146,6 +170,69 @@ void FScene::RemoveAllLights()
 	LocalLightProxies.Reset();
 	LocalLightParameters.Reset();
 	SkyLights.Reset();
+}
+
+void FScene::AddDecal(UDecalComponent* Component)
+{
+	if (!Component || Component->SceneProxy) return;
+
+	FDecalSceneProxy* Proxy = Component->CreateSceneProxy();
+	if (!Proxy)
+	{
+		return;
+	}
+
+	Component->SceneProxy = Proxy;
+	Proxy->Scene = this;
+	Proxy->PackedIndex = DecalSceneProxies.Num();
+	MarkDecalDirty(Proxy);
+	MarkDecalRenderStateDirty(Proxy);
+
+	DecalSceneProxies.Add(Proxy);
+}
+
+void FScene::RemoveDecal(UDecalComponent* Component)
+{
+	if (!Component) return;
+
+	FDecalSceneProxy* Proxy = Component->SceneProxy;
+	if (!Proxy)
+	{
+		return;
+	}
+
+	const int32 Index = Proxy->PackedIndex;
+
+	DecalSceneProxies.RemoveAtSwap(Index);
+	if (Index < DecalSceneProxies.Num())
+		DecalSceneProxies[Index]->PackedIndex = Index;
+
+	if (Proxy->bQueuedForUpdate)
+	{
+		const int32 Found = DirtyDecalProxies.Find(Proxy);
+		if (Found != INDEX_NONE) DirtyDecalProxies.RemoveAtSwap(Found);
+	}
+
+	if (Proxy->bRenderStateQueued)
+	{
+		const int32 Found = RenderStateDirtyDecalProxies.Find(Proxy);
+		if (Found != INDEX_NONE) RenderStateDirtyDecalProxies.RemoveAtSwap(Found);
+	}
+
+	Component->SceneProxy = nullptr;
+	delete Proxy;
+}
+
+void FScene::RemoveAllDecals()
+{
+	for (FDecalSceneProxy* Proxy : DecalSceneProxies)
+	{
+		delete Proxy;
+	}
+
+	DecalSceneProxies.Reset();
+	DirtyDecalProxies.Reset();
+	RenderStateDirtyDecalProxies.Reset();
 }
 
 // 등록된 라이트를 셰이더용 상수로 모아 Renderer에 올린다. 컴포넌트 값을 매 프레임 직접 읽으므로 별도 갱신 경로가 필요 없다.
@@ -328,17 +415,40 @@ void FScene::UpdateFogInfo(uint32 Id, const FFogInfo& FogInfo)
 
 void FScene::UpdateAllTransforms()
 {
+	for (FDecalSceneProxy* Proxy : RenderStateDirtyDecalProxies)
+	{
+		Proxy->UpdateRenderState();
+		Proxy->bRenderStateQueued = false;
+	}
+	RenderStateDirtyDecalProxies.Reset();
+
+	for (FDecalSceneProxy* Proxy : DirtyDecalProxies)
+	{
+		Proxy->UpdateTransform();
+		Proxy->bQueuedForUpdate = false;
+	}
+	DirtyDecalProxies.Reset();
+
 	for (FPrimitiveSceneProxy* Proxy : RenderStateDirtyProxies)
 	{
 		Proxy->UpdateRenderState();
 		Proxy->bRenderStateQueued = false;
+		// 보이기, Receive Decal, 메시가 바뀌었을 수 있다.
+		if (CanReceiveProjectedDecal(Proxy))
+			ChangedReceiverBounds.Add(Proxy->GetBounds());
 	}
 	RenderStateDirtyProxies.Reset();
 
 	for (FPrimitiveSceneProxy* Proxy : DirtyProxies)
 	{
+		// 옮기기 전 자리의 Decal은 표면이 사라지고, 옮긴 자리의 Decal은 표면이 새로 생긴다.
+		const bool bReceiver = CanReceiveProjectedDecal(Proxy);
+		if (bReceiver)
+			ChangedReceiverBounds.Add(PrimitiveBounds[Proxy->PackedIndex]);
 		Proxy->UpdateTransform();
 		PrimitiveBounds[Proxy->PackedIndex] = Proxy->GetBounds();
+		if (bReceiver)
+			ChangedReceiverBounds.Add(Proxy->GetBounds());
 		PrimitiveFlags[Proxy->PackedIndex] = Proxy->GetComponent()->IsVisible() ? 1 : 0;
 		Proxy->bQueuedForUpdate = false;
 	}
@@ -372,6 +482,67 @@ void FScene::UpdateAllTransforms()
 	{
 		BVH.Refit();
 	}
+
+	// SSD 모드에서도 표시는 남겨 두어, Projected로 바꿀 때 낡은 메시를 다시 만들게 한다.
+	MarkProjectedDecalsDirty();
+
+	if (FDecalSettings::GetMode() == EDecalMode::Projected)
+	{
+		SCOPE_CYCLE_COUNTER(DecalStats::STAT_ProjectedBuildCPU);
+		for (FDecalSceneProxy* Proxy : DecalSceneProxies)
+		{
+			if (Proxy->bProjectedMeshDirty)
+			{
+				Proxy->BuildProjectedMesh(*this);
+				FStatRegistry::AddCounter(DecalStats::STAT_ProjectedBuilds);
+			}
+		}
+	}
+}
+
+static bool AABBOverlaps(const FAABB& A, const FAABB& B)
+{
+	return std::abs(A.Center.X - B.Center.X) <= A.Extent.X + B.Extent.X &&
+		   std::abs(A.Center.Y - B.Center.Y) <= A.Extent.Y + B.Extent.Y &&
+		   std::abs(A.Center.Z - B.Center.Z) <= A.Extent.Z + B.Extent.Z;
+}
+
+void FScene::MarkProjectedDecalsDirty()
+{
+	if (AppliedDecalSettingsVersion != FDecalSettings::GetVersion())
+	{
+		AppliedDecalSettingsVersion = FDecalSettings::GetVersion();
+		for (FDecalSceneProxy* Proxy : DecalSceneProxies)
+		{
+			Proxy->bProjectedMeshDirty = true;
+		}
+		ChangedReceiverBounds.Reset();
+		return;
+	}
+
+	if (ChangedReceiverBounds.IsEmpty())
+	{
+		return;
+	}
+
+	for (FDecalSceneProxy* Proxy : DecalSceneProxies)
+	{
+		if (Proxy->bProjectedMeshDirty)
+		{
+			continue;
+		}
+
+		for (const FAABB& Changed : ChangedReceiverBounds)
+		{
+			if (AABBOverlaps(Proxy->GetBounds(), Changed))
+			{
+				Proxy->bProjectedMeshDirty = true;
+				break;
+			}
+		}
+	}
+
+	ChangedReceiverBounds.Reset();
 }
 
 void FScene::BuildBVH()
@@ -402,4 +573,18 @@ void FScene::MarkRenderStateDirty(FPrimitiveSceneProxy* Proxy)
 	if (!Proxy || Proxy->bRenderStateQueued) return;
 	Proxy->bRenderStateQueued = true;
 	RenderStateDirtyProxies.Add(Proxy);
+}
+
+void FScene::MarkDecalDirty(FDecalSceneProxy* Proxy)
+{
+	if (!Proxy || Proxy->bQueuedForUpdate) return;
+	Proxy->bQueuedForUpdate = true;
+	DirtyDecalProxies.Add(Proxy);
+}
+
+void FScene::MarkDecalRenderStateDirty(FDecalSceneProxy* Proxy)
+{
+	if (!Proxy || Proxy->bRenderStateQueued) return;
+	Proxy->bRenderStateQueued = true;
+	RenderStateDirtyDecalProxies.Add(Proxy);
 }

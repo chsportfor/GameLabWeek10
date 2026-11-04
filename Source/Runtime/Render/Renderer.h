@@ -26,14 +26,15 @@ struct FPerObjectConstants
 	// (World^-1)^T. 비균등 스케일에서도 노멀이 표면에 수직으로 남도록 노멀 변환에 쓴다.
 	FMatrix NormalMatrix;
 	uint32 ReceiveShadow = 0;
-	uint32 Padding[3]{};
+	uint32 ReceiveDecal = 0;
+	uint32 Padding[2]{};
 };
 static_assert(sizeof(FPerObjectConstants) == 144);
 
 // 오브젝트 칸 하나를 채운다. 프록시는 WorldToLocal을 이미 들고 있어 역행렬 계산을 건너뛸 수 있다.
-inline void WritePerObjectConstants(uint8* Dest, const FMatrix& World, const FMatrix& WorldToLocal, bool bReceiveShadow)
+inline void WritePerObjectConstants(uint8* Dest, const FMatrix& World, const FMatrix& WorldToLocal, bool bReceiveShadow, bool bReceiveDecal)
 {
-	const FPerObjectConstants Constants{ World, WorldToLocal.GetTransposed(), static_cast<uint32>(bReceiveShadow),{} };
+	const FPerObjectConstants Constants{ World, WorldToLocal.GetTransposed(), static_cast<uint32>(bReceiveShadow), static_cast<uint32>(bReceiveDecal),{} };
 	std::memcpy(Dest, &Constants, sizeof(Constants));
 }
 
@@ -292,6 +293,19 @@ public:
 	FOcclusionMeasureResult MeasureOpaqueOcclusion(const FMatrix& ViewProjection);
 
 	void GetShadowViewIds(const FLightSceneProxy& LightProxy, TArray<uint32>& OutViewIds) const;
+	
+	
+
+	// DBuffer가 요청 크기를 담을 수 있게 보장한다.
+	bool EnsureDBuffer(uint32 InDBufferWidth, uint32 InDBufferHeight);
+	FTexture2D* GetDBuffer() const;
+	
+	bool EnsureAdditiveBuffer(uint32 InAdditiveBufferWidth, uint32 InAdditiveBufferHeight);
+	FTexture2D* GetAdditiveBuffer() const;
+
+	bool EnsureNormalDBuffer(uint32 InNormalDBufferWidth, uint32 InNormalDBufferHeight);
+	FTexture2D* GetNormalDBuffer() const;
+
 
 	// Details Preview에서 선택한 투영의 이번 프레임 캐시 상태를 확인한다.
 	struct FShadowCacheDebugInfo
@@ -330,7 +344,7 @@ private:
 	void BindMaterial(UMaterial* Material);
 	void UpdateMaterialParams(const FRenderPacket& RenderPacket);
 	void UpdatePerObjectConstants(const FRenderPacket& RenderPacket, const FMatrix& ViewProjection);
-	void UpdatePerObjectConstants(const FMatrix& World, bool bReceiveShadow);
+	void UpdatePerObjectConstants(const FMatrix& World, bool bReceiveShadow, bool bReceiveDecal);
 	void EnsurePerObjectSlotCapacity(uint32 SlotCount);
 	void UploadPerObjectConstants();
 
@@ -368,6 +382,12 @@ private:
 	// 타깃 교체 전에 초기화한다.
 	TArray<FTexture2D*> ShadowDepthBindings;
 
+	// 데칼용 버퍼
+	TUniquePtr<FTexture2D> DBuffer;
+	TUniquePtr<FTexture2D> AdditiveBuffer;
+	// rgb = 알파를 곱한 (월드 법선 * 0.5 + 0.5), a = 덮은 정도
+	TUniquePtr<FTexture2D> NormalDBuffer;
+
 	// 필요한 항목 수가 기존 용량을 초과했을 때 GPU 버퍼를 교체한다.
 	bool EnsureShadowParameterCapacity(uint32 RequiredCount);
 
@@ -378,6 +398,10 @@ private:
 	void BindShadowResources();
 	// 그림자 작업 및 자원에 대해 통계를 갱신한다.
 	void UpdateShadowStats();
+
+
+	
+	
 
 	// FIFO 소비용 배열의 용량만 재사용하며 매 View의 패킷 값은 새로 채운다.
 	FRenderQueue RenderPackets;

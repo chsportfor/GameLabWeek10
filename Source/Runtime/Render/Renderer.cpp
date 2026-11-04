@@ -160,7 +160,8 @@ void FRenderer::UploadPerObjectConstants()
 		FRenderPacket& P = RenderPackets[Index];
 		const FMatrix& Model = GetPacketWorld(P);
 		const FMatrix WorldToLocal = P.Proxy ? P.Proxy->GetWorldToLocal() : Model.Inverse();
-		WritePerObjectConstants(Dest + static_cast<size_t>(Index) * ObjectSlotBytes, Model, WorldToLocal, P.Proxy && P.Proxy->IsShadowReceiver());
+		WritePerObjectConstants(Dest + static_cast<size_t>(Index) * ObjectSlotBytes, 
+			Model, WorldToLocal, P.Proxy && P.Proxy->IsShadowReceiver(), P.Proxy && P.Proxy->IsDecalReceiver());
 		P.Slot = Index;
 	}
 
@@ -400,6 +401,111 @@ void FRenderer::UpdateShadowStats()
 	FStatRegistry::SetMemory(ShadowStats::STAT_AtlasReservedMemory, ReservedBytes);
 }
 
+
+bool FRenderer::EnsureDBuffer(uint32 InDBufferWidth, uint32 InDBufferHeight)
+{
+	if (InDBufferWidth == 0 || InDBufferHeight == 0)
+	{
+		return (false);
+	}
+	if (!DBuffer || DBuffer->GetWidth() < InDBufferWidth || DBuffer->GetHeight() < InDBufferHeight)
+	{
+
+		D3D11_TEXTURE2D_DESC Desc{};
+		Desc.Width = DBuffer ? std::max(InDBufferWidth, DBuffer->GetWidth()) : InDBufferWidth;
+		Desc.Height = DBuffer ? std::max(InDBufferHeight, DBuffer->GetHeight()) : InDBufferHeight;
+		Desc.MipLevels = 1;
+		Desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+		Desc.SampleDesc.Count = 1;
+		Desc.Usage = D3D11_USAGE_DEFAULT;
+		Desc.ArraySize = 1;
+		Desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+		DBuffer = RenderCommand::CreateTexture2D(Desc);
+
+		return (DBuffer && DBuffer->GetRTV() != nullptr);
+	}
+	else
+	{
+		return (true);
+	}
+}
+
+FTexture2D* FRenderer::GetDBuffer() const
+{
+	return (DBuffer.get());
+}
+
+bool FRenderer::EnsureAdditiveBuffer(uint32 InAdditiveBufferWidth, uint32 InAdditiveBufferHeight)
+{
+	if (InAdditiveBufferWidth == 0 || InAdditiveBufferHeight == 0)
+	{
+		return (false);
+	}
+	if (!AdditiveBuffer || AdditiveBuffer->GetWidth() < InAdditiveBufferWidth || AdditiveBuffer->GetHeight() < InAdditiveBufferHeight)
+	{
+
+		D3D11_TEXTURE2D_DESC Desc{};
+		Desc.Width = AdditiveBuffer ? std::max(InAdditiveBufferWidth, AdditiveBuffer->GetWidth()) : InAdditiveBufferWidth;
+		Desc.Height = AdditiveBuffer ? std::max(InAdditiveBufferHeight, AdditiveBuffer->GetHeight()) : InAdditiveBufferHeight;
+		Desc.MipLevels = 1;
+		Desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+		Desc.SampleDesc.Count = 1;
+		Desc.Usage = D3D11_USAGE_DEFAULT;
+		Desc.ArraySize = 1;
+		Desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+		AdditiveBuffer = RenderCommand::CreateTexture2D(Desc);
+
+		return (AdditiveBuffer && AdditiveBuffer->GetRTV() != nullptr);
+	}
+	else
+	{
+		return (true);
+	}
+}
+
+FTexture2D* FRenderer::GetAdditiveBuffer() const
+{
+	return (AdditiveBuffer.get());
+}
+
+bool FRenderer::EnsureNormalDBuffer(uint32 InNormalDBufferWidth, uint32 InNormalDBufferHeight)
+{
+	if (InNormalDBufferWidth == 0 || InNormalDBufferHeight == 0)
+	{
+		return (false);
+	}
+	if (!NormalDBuffer || NormalDBuffer->GetWidth() < InNormalDBufferWidth || NormalDBuffer->GetHeight() < InNormalDBufferHeight)
+	{
+		D3D11_TEXTURE2D_DESC Desc{};
+		Desc.Width = NormalDBuffer ? std::max(InNormalDBufferWidth, NormalDBuffer->GetWidth()) : InNormalDBufferWidth;
+		Desc.Height = NormalDBuffer ? std::max(InNormalDBufferHeight, NormalDBuffer->GetHeight()) : InNormalDBufferHeight;
+		Desc.MipLevels = 1;
+		// 법선은 색이 아니므로 sRGB 변환 없이 그대로 저장한다.
+		Desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		Desc.SampleDesc.Count = 1;
+		Desc.Usage = D3D11_USAGE_DEFAULT;
+		Desc.ArraySize = 1;
+		Desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+		NormalDBuffer = RenderCommand::CreateTexture2D(Desc);
+
+		return (NormalDBuffer && NormalDBuffer->GetRTV() != nullptr);
+	}
+	else
+	{
+		return (true);
+	}
+}
+
+FTexture2D* FRenderer::GetNormalDBuffer() const
+{
+	return (NormalDBuffer.get());
+}
+
+
+
 // 카메라의 ViewProjection을 공통 렌더 경로로 전달한다.
 void FRenderer::RenderAll(FRenderQueue& InQueue, UCameraComponent* CameraComponent)
 {
@@ -436,8 +542,18 @@ void FRenderer::RenderOpaque(const FMatrix& ViewProjection)
 	RenderCommand::BindConstantBuffer(5, GridLightingCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 	RenderCommand::BindSamplerState(1, ESamplerState::ShadowPCF,EShaderBindFlagBits::Pixel);
 	BindShadowResources();
+
+	if (DBuffer)
+		RenderCommand::BindShaderResource(8, DBuffer.get(), EShaderBindFlagBits::Pixel);
+	if (AdditiveBuffer)
+		RenderCommand::BindShaderResource(9, AdditiveBuffer.get(), EShaderBindFlagBits::Pixel);
+	if (NormalDBuffer)
+		RenderCommand::BindShaderResource(11, NormalDBuffer.get(), EShaderBindFlagBits::Pixel);
 	DrawStaticGroups();
 	DrawPackets(0, FirstTranslucentIndex, ViewProjection);
+	RenderCommand::UnbindShaderResource(8, EShaderBindFlagBits::Pixel);
+	RenderCommand::UnbindShaderResource(9, EShaderBindFlagBits::Pixel);
+	RenderCommand::UnbindShaderResource(11, EShaderBindFlagBits::Pixel);
 }
 
 // RenderOpaque가 남긴 반투명 패킷을 먼 것부터 그린다.
@@ -488,7 +604,7 @@ void FRenderer::DrawStaticGroups()
 			else
 			{
 				RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
-				UpdatePerObjectConstants(Item.Proxy->GetLocalToWorld(), Item.Proxy->IsShadowReceiver());
+				UpdatePerObjectConstants(Item.Proxy->GetLocalToWorld(), Item.Proxy->IsShadowReceiver(), Item.Proxy->IsDecalReceiver());
 			}
 			RenderCommand::DrawIndexed(Item.IndexCount, Item.StartIndex);
 		}
@@ -1047,7 +1163,7 @@ FOcclusionMeasureResult FRenderer::MeasureOpaqueOcclusion(const FMatrix& ViewPro
 		else
 		{
 			RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
-			UpdatePerObjectConstants(*Draw.World, false);
+			UpdatePerObjectConstants(*Draw.World, false, false);
 		}
 
 		ID3D11Query* Query = OcclusionQueries[Index].Get();
@@ -1216,15 +1332,18 @@ void FRenderer::UpdatePerObjectConstants(const FRenderPacket& RenderPacket, cons
 	// rp.Transform 과 Camera VP 행렬 곱
 	// 행렬곱의 결과 (MVP Matrix) Constant Buffer 업데이트 필요
 
-	UpdatePerObjectConstants(GetPacketWorld(RenderPacket),	RenderPacket.Proxy && RenderPacket.Proxy->IsShadowReceiver());
+	UpdatePerObjectConstants(GetPacketWorld(RenderPacket),	
+		RenderPacket.Proxy && RenderPacket.Proxy->IsShadowReceiver(), 
+		RenderPacket.Proxy && RenderPacket.Proxy->IsDecalReceiver());
 }
 
-void FRenderer::UpdatePerObjectConstants(const FMatrix& World, bool bReceiveShadow)
+void FRenderer::UpdatePerObjectConstants(const FMatrix& World, bool bReceiveShadow, bool bReceiveDecal)
 {
 	FPerObjectConstants Constants{};
 	Constants.World = World;
 	Constants.NormalMatrix = World.Inverse().GetTransposed();
 	Constants.ReceiveShadow = static_cast<uint32>(bReceiveShadow);
+	Constants.ReceiveDecal = static_cast<uint32>(bReceiveDecal);
 	RenderCommand::UpdateBufferData(PerObjectCB.get(), &Constants);
 }
 

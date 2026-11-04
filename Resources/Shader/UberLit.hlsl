@@ -105,7 +105,8 @@ cbuffer PerObjectConstants : register(b2)
     matrix World;
     matrix WorldInverseTranspose; // (World^-1)^T
     uint ReceiveShadow;
-    uint3 ObjectPadding;
+    uint ReceiveDecal;
+    uint2 ObjectPadding;
 };
 
 // b3는 쓰지 않는다.
@@ -140,6 +141,12 @@ StructuredBuffer<uint> CellLightIndices : register(t12);
 
 Texture2D DiffuseTexture : register(t0);
 Texture2D NormalTexture : register(t1);
+#if !defined(EDITOR_ARROW_SHADER)
+Texture2D DBuffer : register(t8);
+Texture2D AdditiveBuffer : register(t9);
+// rgb = 알파를 곱한 (월드 법선 * 0.5 + 0.5), a = Decal이 덮은 정도
+Texture2D NormalDBuffer : register(t11);
+#endif
 SamplerState MaterialSampler : register(s0);
 SamplerComparisonState PCFSampler : register(s1);
 
@@ -191,9 +198,10 @@ struct VS_OUTPUT
     float4 Tangent : TANGENT;
     float2 UV : TEXCOORD0;
     float4 Color : COLOR;
+    nointerpolation uint ReceivesDecal : TEXCOORD2;
 #if defined(LIGHTING_MODEL_LAMBERT) || defined(LIGHTING_MODEL_BLINN_PHONG)
     // 물체별 정수 설정은 삼각형 내부에서 보간하지 않는다.
-    nointerpolation uint ReceivesShadow : TEXCOORD2;
+    nointerpolation uint ReceivesShadow : TEXCOORD3;
 #endif
 #if LIGHTING_MODEL_GOURAUD
     float3 VertexDiffuse : COLOR1;   // 정점에서 미리 계산한 Diffuse 조명
@@ -827,6 +835,7 @@ VS_OUTPUT mainVS(VS_INPUT Input)
 
     Output.UV = Input.UV;
     Output.Color = Input.Color;
+    Output.ReceivesDecal = ReceiveDecal;
 #if defined(LIGHTING_MODEL_LAMBERT) || defined(LIGHTING_MODEL_BLINN_PHONG)
     // 기존 b2의 VS 전용 바인딩을 유지하면서 PS에 전달한다.
     Output.ReceivesShadow = ReceiveShadow;
@@ -872,9 +881,17 @@ float4 mainPS(VS_OUTPUT Input) : SV_TARGET
     const float4 TexColor = DiffuseTexture.Sample(MaterialSampler, UV);
     float4 Albedo = TexColor * BaseColor;
 #if !defined(EDITOR_ARROW_SHADER)
+    
     // 씬은 HDR 타깃에 선형으로 쌓이므로 sRGB로 인코딩된 디퓨즈 텍스처와 BaseColor를 각각 선형으로 바꾼다.
     // 에디터 화살표는 톤 매핑 이후 LDR 타깃에 그려지므로 sRGB 그대로 둔다.
     Albedo.rgb = SRGBToLinear(TexColor.rgb) * SRGBToLinear(BaseColor.rgb);
+    
+    if (Input.ReceivesDecal && bOpaque > 0.5f)
+    {
+        const float4 Decal = DBuffer.Load(int3(Input.SvPosition.xy, 0));
+        Albedo.rgb = Albedo.rgb * (1.0f - Decal.a) + Decal.rgb;
+    }
+    
 
     if (LightDebugMode == LIGHT_DEBUG_MODE_CELL_HEATMAP && NumTilesX > 0)
     {
@@ -898,7 +915,19 @@ float4 mainPS(VS_OUTPUT Input) : SV_TARGET
     const float3 T = { bWorldUV ? WorldUVTangent : MeshT };
     const float3 B = { bWorldUV ? WorldUVBitangent : cross(VertexNormal, MeshT) * (Input.Tangent.w < 0.0f ? -1.0f : 1.0f) };
     const float3 TangentNormal = { NormalTexture.Sample(MaterialSampler, UV).xyz * 2.0f - 1.0f };
-    const float3 N = { normalize(T * TangentNormal.x + B * -TangentNormal.y + VertexNormal * TangentNormal.z) };
+    float3 N = { normalize(T * TangentNormal.x + B * -TangentNormal.y + VertexNormal * TangentNormal.z) };
+#if !defined(EDITOR_ARROW_SHADER)
+    // Decal 법선으로 교체한다. 블렌딩으로 rgb에 알파가 곱해져 있어 (rgb * 2 - a)가 알파를 곱한 법선이다.
+    // 그림자 바이어스는 실제 표면 기준이어야 하므로 VertexNormal은 그대로 둔다.
+    if (Input.ReceivesDecal && bOpaque > 0.5f)
+    {
+        const float4 DecalNormal = NormalDBuffer.Load(int3(Input.SvPosition.xy, 0));
+        if (DecalNormal.a > 0.0f)
+        {
+            N = normalize(N * (1.0f - DecalNormal.a) + (DecalNormal.rgb * 2.0f - DecalNormal.a));
+        }
+    }
+#endif
 #endif
 
     // Opaque는 알파를 1로 고정한다. 뷰포트 RT를 ImGui가 알파 블렌딩으로 그리므로 알파가 남으면 비쳐 보인다
@@ -923,6 +952,12 @@ float4 mainPS(VS_OUTPUT Input) : SV_TARGET
 
     // 먼저 기존 조명과 그림자를 모두 반영한 표면 색을 계산한다.
     float3 FinalColor = Albedo.rgb * DiffuseLighting + SpecularLighting;
+#if !defined(EDITOR_ARROW_SHADER)
+    if (Input.ReceivesDecal && bOpaque > 0.5f)
+    {
+        FinalColor += Albedo.rgb * AdditiveBuffer.Load(int3(Input.SvPosition.xy, 0)).rgb;
+    }
+#endif
 
 #if defined(LIGHTING_MODEL_LAMBERT) || defined(LIGHTING_MODEL_BLINN_PHONG)
     if (VisualizeShadowCascades != 0 && Input.ReceivesShadow != 0)
