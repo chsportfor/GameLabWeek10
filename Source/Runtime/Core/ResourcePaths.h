@@ -15,11 +15,12 @@ namespace ResourcePaths
 	constexpr const char* DefaultSkyPanorama = "Resources/SkySphere/Sky.hdr";
 	constexpr const char* DefaultParticleTexture = "Resources/SubUV/StarParticle.png";
 
-	// 라이트·안개 액터의 에디터 빌보드 아이콘
+	// 라이트·안개·데칼 액터의 에디터 빌보드 아이콘
 	constexpr const char* DirectionalLightIcon = "Resources/Icons/Directional.png";
 	constexpr const char* PointLightIcon = "Resources/Icons/Point.png";
 	constexpr const char* SpotLightIcon = "Resources/Icons/Spot.png";
 	constexpr const char* RectLightIcon = "Resources/Icons/Rect.png";
 	constexpr const char* SkyLightIcon = "Resources/Icons/Sky.png";
 	constexpr const char* FogIcon = "Resources/Icons/Fog.png";
+	constexpr const char* DecalIcon = "Resources/Icons/Decal.png";
 }

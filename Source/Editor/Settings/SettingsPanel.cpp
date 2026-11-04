@@ -5,6 +5,7 @@
 #include "Camera/CameraComponent.h"
 #include "Render/Renderer.h"
 #include "Render/ShadowSettings.h"
+#include "Render/DecalSettings.h"
 #include "Engine/World.h"
 #include "Editor/EditorUI/ShowFlagUI.h"
 
@@ -42,6 +43,14 @@ void FSettingsPanel::OnRender()
 
 	ImGui::TextDisabled("Fill mode is configured per viewport.");
 	ShowFlagUI::DrawFlags(Settings.ShowFlags, EShowFlagScope::Global, EShowFlagGroup::Rendering);
+	ImGui::BeginDisabled(!Settings.ShowFlags.IsEnabled(EEngineShowFlag::Decals));
+	int DecalMode = static_cast<int>(FDecalSettings::GetMode());
+	if (ImGui::Combo("Decal Mode", &DecalMode, "Screen Space\0Projected\0"))
+		FDecalSettings::SetMode(static_cast<EDecalMode>(DecalMode));
+	float DecalNormalAngle = FDecalSettings::GetNormalAngle();
+	if (ImGui::SliderFloat("Decal Angle Limit", &DecalNormalAngle, 0.0f, 180.0f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp))
+		FDecalSettings::SetNormalAngle(DecalNormalAngle);
+	ImGui::EndDisabled();
 	ImGui::SliderFloat("Exposure", &Settings.Exposure, 0.1f, 5.0f, "%.2f");
 	if (World)
 	{

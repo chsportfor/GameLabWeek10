@@ -3,6 +3,7 @@
 #include "PrimitiveSceneProxy.h"
 #include "LightSceneProxy.h"
 #include "LocalLightSceneProxy.h"
+#include "DecalSceneProxy.h"
 #include "DirectionalLightSceneProxy.h"
 #include "Components/BillboardComponent.h"
 #include "Components/PrimitiveComponent.h"
@@ -42,12 +43,18 @@ public:
 	bool HasFogOverride() const;
 	const FFogInfo* GetFogInfo() const;
 
+	void AddDecal(UDecalComponent* Component);
+	void RemoveDecal(UDecalComponent* Component);
+	void RemoveAllDecals();
+
 	void UpdateAllTransforms();
 
 	void BuildBVH();
 
 	void MarkDirty(FPrimitiveSceneProxy* Proxy);
 	void MarkRenderStateDirty(FPrimitiveSceneProxy* Proxy);
+	void MarkDecalDirty(FDecalSceneProxy* Proxy);
+	void MarkDecalRenderStateDirty(FDecalSceneProxy* Proxy);
 
 	TArray<FPrimitiveSceneProxy*> PrimitiveSceneProxies;
 	TArray<FPrimitiveSceneProxy*> DirtyProxies;
@@ -69,10 +76,21 @@ public:
 
 	TArray<FLocalLightSceneProxy*>        LocalLightProxies;      // ↔ PackedIndex ↔
 	TArray<FLightRenderParameters>        LocalLightParameters;   // GPU 업로드용, 같은 순서
+	TArray<FDecalSceneProxy*>			  DecalSceneProxies;
+	TArray<FDecalSceneProxy*>			  DirtyDecalProxies;
+	TArray<FDecalSceneProxy*>			  RenderStateDirtyDecalProxies;
 	TArray<FDirectionalLightSceneProxy*>  DirectionalLightProxies;
 	TArray<USkyLightComponent*>           SkyLights;               // 프록시 없음
 
 private:
+	// 바뀐 Receiver 영역과 겹치는 Decal에만 투영 메시 재생성 표시를 한다.
+	void MarkProjectedDecalsDirty();
+
 	FFogInfo mFogOverride{};
 	bool mHasFogOverride{};
+
+	// 이번 프레임에 추가, 삭제, 이동, 상태 변경된 Primitive가 차지하던 영역과 새 영역
+	TArray<FAABB> ChangedReceiverBounds;
+	// 마지막으로 반영한 FDecalSettings 버전. 각도 같은 설정이 바뀌면 모든 투영 메시를 다시 만든다.
+	uint32 AppliedDecalSettingsVersion = 0;
 };

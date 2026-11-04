@@ -86,7 +86,7 @@ void UPrimitiveComponent::MarkRenderStateDirty()
 void UPrimitiveComponent::PostEditChangeProperty(const FProperty& Property)
 {
 	Super::PostEditChangeProperty(Property);
-	if (Property.Name == "bVisible"||Property.Name=="bCastShadow"||Property.Name=="bReceiveShadow")
+	if (Property.Name == "bVisible"||Property.Name=="bCastShadow"||Property.Name=="bReceiveShadow"||Property.Name=="bReceiveDecal")
 		MarkRenderStateDirty();
 }
 
