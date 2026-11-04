@@ -114,6 +114,8 @@ public:
 	virtual void Serialize(FStructuredArchive::FRecord Record);
 
 	virtual void PostEditChangeProperty(const FProperty& Property) {};
+	// 디테일 창에 이 프로퍼티를 보여 줄지 정한다. 다른 값에 따라 숨길 때 재정의한다.
+	virtual bool IsPropertyVisibleInDetails(const FProperty& Property) const { return true; }
 
 	void* operator new(uint64 Size)
 	{

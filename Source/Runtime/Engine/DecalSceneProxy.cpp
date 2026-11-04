@@ -2,6 +2,7 @@
 #include "DecalSceneProxy.h"
 #include "Engine/Scene.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkinnedMeshComponent.h"
 #include "Render/RenderCommand.h"
 #include "Render/DecalSettings.h"
 
@@ -86,9 +87,71 @@ void FDecalSceneProxy::BuildProjectedMesh(const FScene& Scene)
 			return Box.Intersects(DecalBox);
 		};
 
+	// 메시 로컬 삼각형 하나를 Decal 공간으로 옮겨 박스, 각도 검사를 통과하면 후보에 넣는다.
+	// StaticMesh와 스켈레탈 경로가 함께 쓴다.
+	const auto TryAddTriangle = [&](const FMatrix& MeshToDecal, bool bMirrored,
+		const FVector& LocalP0, const FVector& LocalP1, const FVector& LocalP2)
+		{
+			FDecalTriangle Triangle;
+			Triangle.P[0] = MeshToDecal.TransformPosition(LocalP0);
+			Triangle.P[1] = MeshToDecal.TransformPosition(LocalP1);
+			Triangle.P[2] = MeshToDecal.TransformPosition(LocalP2);
+
+			// 메시 공간 조회 박스는 회전 때문에 넉넉하므로, Decal 공간의 정확한 박스로 다시 거른다.
+			FBox TriangleBox{ Triangle.P[0], Triangle.P[0] };
+			TriangleBox.Expand(FBox{ Triangle.P[1], Triangle.P[1] });
+			TriangleBox.Expand(FBox{ Triangle.P[2], Triangle.P[2] });
+			if (!TriangleBox.Intersects(UnitBox))
+			{
+				return;
+			}
+
+			if (bMirrored)
+			{
+				std::swap(Triangle.P[1], Triangle.P[2]);
+			}
+
+			// Decal 공간은 축마다 스케일이 달라 각도가 틀어지므로, 각도는 월드에서 잰다.
+			const FVector WorldNormal = FVector::Cross(
+				DecalToWorld.TransformPosition(Triangle.P[1]) - DecalToWorld.TransformPosition(Triangle.P[0]),
+				DecalToWorld.TransformPosition(Triangle.P[2]) - DecalToWorld.TransformPosition(Triangle.P[0]));
+			const float NormalLength = WorldNormal.Size();
+
+			// SSD 셰이더와 같은 각도 리젝션. 표면이 Decal을 마주 보는 방향(-투영 방향)과 이루는 각도가
+			// 설정값보다 크면 옆면, 뒷면으로 보고 버린다. 넓이가 0인 삼각형도 여기서 빠진다.
+			if (NormalLength <= 0.0f || FVector::Dot(WorldNormal, FacingDirection) < NormalThreshold * NormalLength)
+			{
+				return;
+			}
+
+			ProjectedCandidateTriangles.Add(Triangle);
+		};
+
 	Scene.BVH.Query(BoundsTest, [&](FPrimitiveSceneProxy* Proxy)
 		{
 			if (!Proxy->IsVisible() || !Proxy->IsDecalReceiver()) return;
+
+			const FMatrix MeshToDecal = Proxy->GetLocalToWorld() * WorldToDecal;
+			// 음수 스케일로 뒤집힌 메시는 감김 방향도 뒤집혀 있어, 저장할 때 바깥을 향하도록 되돌린다.
+			const bool bMirrored = MeshToDecal.Determinant() < 0.0f;
+
+			// 스켈레탈은 TriangleBVH가 없으므로 현재 자세의 스키닝 삼각형을 모두 검사한다.
+			// 캐릭터 Bounds가 Decal과 겹칠 때만 여기까지 오고, 자세가 바뀌면 다시 잘린다.
+			if (const auto* SkinnedComponent = Cast<USkinnedMeshComponent>(Proxy->GetComponent()))
+			{
+				const TArray<FVertex>& Vertices = SkinnedComponent->GetSkinnedVertices();
+				const TArray<uint32>& Indices = SkinnedComponent->GetSkinnedIndices();
+				const uint32 VertexCount = static_cast<uint32>(Vertices.Num());
+				for (int32 Index = 0; Index + 2 < Indices.Num(); Index += 3)
+				{
+					const uint32 I0 = Indices[Index];
+					const uint32 I1 = Indices[Index + 1];
+					const uint32 I2 = Indices[Index + 2];
+					if (I0 >= VertexCount || I1 >= VertexCount || I2 >= VertexCount) continue;
+					TryAddTriangle(MeshToDecal, bMirrored, Vertices[I0].Position, Vertices[I1].Position, Vertices[I2].Position);
+				}
+				return;
+			}
 
 			const auto* StaticMeshComponent = Cast<UStaticMeshComponent>(Proxy->GetComponent());
 			if (!StaticMeshComponent || StaticMeshComponent->IsEditorIcon() || !Proxy->GetMesh() || !Proxy->GetRenderState())
@@ -104,52 +167,17 @@ void FDecalSceneProxy::BuildProjectedMesh(const FScene& Scene)
 
 			// Decal 박스를 메시 로컬로 옮겨 조회하고, 찾은 삼각형은 Decal 공간으로 옮긴다.
 			const FMatrix DecalToMesh = DecalToWorld * Proxy->GetWorldToLocal();
-			const FMatrix MeshToDecal = Proxy->GetLocalToWorld() * WorldToDecal;
 			const FBox QueryBox = UnitBox.GetWorldAABB(DecalToMesh);
 
-			// 음수 스케일로 뒤집힌 메시는 감김 방향도 뒤집혀 있어, 저장할 때 바깥을 향하도록 되돌린다.
-			const bool bMirrored = MeshToDecal.Determinant() < 0.0f;
-
 			MeshData.TriangleBVH->Query(
-				[&](const FBox& Box) 
+				[&](const FBox& Box)
 				{
-					return Box.Intersects(QueryBox); 
+					return Box.Intersects(QueryBox);
 				},
 				[&](const FMeshTriangleElement& Element)
 				{
-					FDecalTriangle Triangle;
-					Triangle.P[0] = MeshToDecal.TransformPosition(Element.V0);
-					Triangle.P[1] = MeshToDecal.TransformPosition(Element.V0 + Element.Edge1);
-					Triangle.P[2] = MeshToDecal.TransformPosition(Element.V0 + Element.Edge2);
-
-					// 메시 공간 조회 박스는 회전 때문에 넉넉하므로, Decal 공간의 정확한 박스로 다시 거른다.
-					FBox TriangleBox{ Triangle.P[0], Triangle.P[0] };
-					TriangleBox.Expand(FBox{ Triangle.P[1], Triangle.P[1] });
-					TriangleBox.Expand(FBox{ Triangle.P[2], Triangle.P[2] });
-					if (!TriangleBox.Intersects(UnitBox))
-					{
-						return;
-					}
-
-					if (bMirrored)
-					{
-						std::swap(Triangle.P[1], Triangle.P[2]);
-					}
-
-					// Decal 공간은 축마다 스케일이 달라 각도가 틀어지므로, 각도는 월드에서 잰다.
-					const FVector WorldNormal = FVector::Cross(
-						DecalToWorld.TransformPosition(Triangle.P[1]) - DecalToWorld.TransformPosition(Triangle.P[0]),
-						DecalToWorld.TransformPosition(Triangle.P[2]) - DecalToWorld.TransformPosition(Triangle.P[0]));
-					const float NormalLength = WorldNormal.Size();
-
-					// SSD 셰이더와 같은 각도 리젝션. 표면이 Decal을 마주 보는 방향(-투영 방향)과 이루는 각도가
-					// 설정값보다 크면 옆면, 뒷면으로 보고 버린다. 넓이가 0인 삼각형도 여기서 빠진다.
-					if (NormalLength <= 0.0f || FVector::Dot(WorldNormal, FacingDirection) < NormalThreshold * NormalLength)
-					{
-						return;
-					}
-
-					ProjectedCandidateTriangles.Add(Triangle);
+					TryAddTriangle(MeshToDecal, bMirrored,
+						Element.V0, Element.V0 + Element.Edge1, Element.V0 + Element.Edge2);
 				});
 		});
 

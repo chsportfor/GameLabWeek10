@@ -36,6 +36,7 @@ public:
     void DestroyRenderState() override;
     void Serialize(json& Handle, bool bIsLoading) override;
     void PostEditChangeProperty(const FProperty& Property) override;
+    bool IsPropertyVisibleInDetails(const FProperty& Property) const override;
     void OnTransformDirty() override;
     void MarkRenderStateDirty();
     FDecalSceneProxy* CreateSceneProxy() const;

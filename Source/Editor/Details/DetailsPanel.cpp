@@ -1083,7 +1083,7 @@ namespace
 			bool bHasVisibleProperty = false;
 			for (const FProperty& Property : Class->GetProperties())
 			{
-				if (Property.HasAnyFlags(CPF_Edit))
+				if (Property.HasAnyFlags(CPF_Edit) && Object->IsPropertyVisibleInDetails(Property))
 				{
 					bHasVisibleProperty = true;
 					break;
@@ -1099,7 +1099,7 @@ namespace
 			{
 				for (const FProperty& Property : Class->GetProperties())
 				{
-					if (!Property.HasAnyFlags(CPF_Edit))
+					if (!Property.HasAnyFlags(CPF_Edit) || !Object->IsPropertyVisibleInDetails(Property))
 					{
 						continue;
 					}
