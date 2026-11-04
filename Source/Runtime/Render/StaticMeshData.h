@@ -74,5 +74,7 @@ struct FStaticMeshData
 
 	void BuildTriangleBVH();
 
-	void BuildTangentSpace(); 
+	void BuildTangentSpace();
 };
+
+void BuildMeshTangentSpace(TArray<FVertex>& Vertices, const TArray<uint32>& Indices);

@@ -158,6 +158,11 @@ void FContentDrawerPanel::OnRender()
 					{
 						CurrentPath /= Path.filename(); // 하위 폴더로 이동
 					}
+					else if (OnOpenSkeletalMesh && (_stricmp(Path.extension().string().c_str(), ".fbx") == 0 ||
+						UAssetManager::IsFbxBakePath(Path)))
+					{
+						OnOpenSkeletalMesh(PathString);
+					}
 				}
 				// 파일 이름 표시
 				ImGui::TextWrapped("%s", FilenameString.c_str());

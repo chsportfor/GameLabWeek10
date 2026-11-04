@@ -239,6 +239,11 @@ public:
 	// Adapter가 계산한 ViewProjection을 직접 받아 View별 렌더 큐를 그린다.
 	void RenderAll(FRenderQueue& InQueue, const FMatrix& ViewProjection, const FVector& CameraWorldPos);
 
+	// 에셋 미리보기: 호출자 소유 조명 버퍼로 일반 패킷만 그린다.
+	// 월드의 LightingCB/LocalLightBuffer/그림자 작업은 변경하지 않는다.
+	void RenderPreview(FRenderQueue& InQueue, const FViewConstants& ViewConstants,
+		FConstantBuffer& PreviewLighting, FConstantBuffer& PreviewLightGrid);
+
 	// 큐를 정렬해 불투명 패킷만 그린다. 반투명은 RenderTranslucent 호출 전까지 보관한다.
 	void RenderOpaque(const FMatrix& ViewProjection);
 

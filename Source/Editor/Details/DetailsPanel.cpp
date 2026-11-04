@@ -6,6 +6,7 @@
 #include "Editor/HitoriEd/EditorResourcePaths.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Components/ParticleSubUVComponent.h"
 #include "Components/LightComponent.h"
@@ -214,6 +215,9 @@ namespace
 
 	FString GetAssetDisplayName(const FString& Path)
 	{
+		if (Path.find("#Static/") != FString::npos)
+			return Path.substr(Path.find_last_of('/') + 1);
+
 		fs::path AssetPath(Path);
 		if (AssetPath.stem() == "Atlas")
 		{
@@ -334,6 +338,56 @@ namespace
 			}
 			ImGui::EndCombo();
 		}
+	}
+
+	void DrawSkeletalMeshSlot(UObject* Owner, USkeletalMesh** SkeletalMeshPtr)
+	{
+		USkeletalMesh* Current = *SkeletalMeshPtr;
+		const FString CurrentPath = Current ? Current->GetPath() : "";
+		const FString CurrentName = Current ? GetAssetDisplayName(CurrentPath) : "None";
+		ImGui::SetNextItemWidth(-1.0f);
+		const bool bOpen = ImGui::BeginCombo("##SkeletalMesh", CurrentName.c_str());
+		if (ImGui::IsItemHovered() && Current)
+			ImGui::SetTooltip("%s", CurrentPath.c_str());
+		if (!bOpen) return;
+
+		auto SelectMesh = [Owner, SkeletalMeshPtr](USkeletalMesh* Mesh)
+		{
+			// 버퍼 참조와 Bounds가 갱신되도록 컴포넌트의 설정 함수를 거친다.
+			if (USkeletalMeshComponent* Component = Cast<USkeletalMeshComponent>(Owner))
+				Component->SetSkeletalMesh(Mesh);
+			else
+				*SkeletalMeshPtr = Mesh;
+		};
+		if (ImGui::Selectable("None", Current == nullptr)) SelectMesh(nullptr);
+
+		struct FSkeletalMeshItem
+		{
+			FString DisplayName;
+			FString Path;
+			USkeletalMesh* Mesh;
+		};
+		TArray<FSkeletalMeshItem> Items;
+		for (TObjectIterator<USkeletalMesh> Itr; Itr; ++Itr)
+		{
+			const FString Path = Itr->GetPath();
+			if (!Path.empty()) Items.Add({ GetAssetDisplayName(Path), Path, *Itr });
+		}
+		std::sort(Items.begin(), Items.end(), [](const FSkeletalMeshItem& A, const FSkeletalMeshItem& B)
+		{
+			return _stricmp(A.DisplayName.c_str(), B.DisplayName.c_str()) < 0;
+		});
+		for (const FSkeletalMeshItem& Item : Items)
+		{
+			ImGui::PushID(Item.Mesh);
+			const bool bSelected = Item.Mesh == Current;
+			if (ImGui::Selectable(Item.DisplayName.c_str(), bSelected)) SelectMesh(Item.Mesh);
+			if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", Item.Path.c_str());
+			if (bSelected) ImGui::SetItemDefaultFocus();
+			ImGui::PopID();
+		}
+		if (Items.IsEmpty()) ImGui::TextDisabled("No skeletal meshes loaded");
+		ImGui::EndCombo();
 	}
 
 	void DrawScriptComponentActions(UScriptComponent& ScriptComponent)
@@ -695,9 +749,12 @@ namespace
 
 					const char* SamplerItems[] = { "Linear Clamp", "Linear Wrap" };
 					int SamplerIndex = Effective ? static_cast<int>(Effective->SamplerState) : static_cast<int>(ESamplerState::LinearClamp);
-					if (ImGui::BeginCombo("##SamplerState", SamplerItems[SamplerIndex]))
+					const int SamplerCount = IM_ARRAYSIZE(SamplerItems);
+					const char* SamplerPreview = SamplerIndex >= 0 && SamplerIndex < SamplerCount
+						? SamplerItems[SamplerIndex] : "Unsupported";
+					if (ImGui::BeginCombo("##SamplerState", SamplerPreview))
 					{
-						for (int i = 0; i < static_cast<int>(ESamplerState::Count); ++i)
+						for (int i = 0; i < SamplerCount; ++i)
 						{
 							if (ImGui::Selectable(SamplerItems[i], SamplerIndex == i))
 							{
@@ -891,6 +948,10 @@ namespace
 			{
 				DrawMeshSlot(Object, reinterpret_cast<UStaticMesh**>(ObjPtr));
 			}
+			else if (Property.Class == USkeletalMesh::StaticClass())
+			{
+				DrawSkeletalMeshSlot(Object, reinterpret_cast<USkeletalMesh**>(ObjPtr));
+			}
 			break;
 		}
 		default:
@@ -902,6 +963,49 @@ namespace
 		{
 			Object->PostEditChangeProperty(Property);
 		}
+	}
+
+	void DrawSkinningTestActions(USkeletalMeshComponent& Component)
+	{
+		USkeletalMesh* Mesh = Component.GetSkeletalMesh();
+		if (!Mesh) return;
+		if (!ImGui::CollapsingHeader("CPU Skinning Test", ImGuiTreeNodeFlags_DefaultOpen)) return;
+
+		const auto& Bones = Mesh->MeshData.Bones;
+		int32 ForearmIndex = -1;
+		for (int32 BoneIndex = 0; BoneIndex < Bones.Num(); ++BoneIndex)
+		{
+			if (Bones[BoneIndex].Name == "forearm.L")
+			{
+				ForearmIndex = BoneIndex;
+				break;
+			}
+		}
+		if (ForearmIndex == -1)
+		{
+			ImGui::TextDisabled("Test bone 'forearm.L' not found. Select the lowpoly mesh.");
+			return;
+		}
+		const FTransform* CurrentPose = Component.GetBoneLocalTransform(ForearmIndex);
+		if (!CurrentPose)
+		{
+			ImGui::TextDisabled("Bone pose is not initialized. Reassign the skeletal mesh.");
+			return;
+		}
+
+		ImGui::TextUnformatted("Left forearm: forearm.L");
+		ImGui::Text("Local rotation: %.1f / %.1f / %.1f",
+			CurrentPose->Rotation.Pitch, CurrentPose->Rotation.Yaw, CurrentPose->Rotation.Roll);
+		// 매번 원본 Ref에서 시작하므로 같은 버튼을 반복해도 회전은 누적되지 않는다.
+		if (ImGui::Button("Forearm 30 deg"))
+		{
+			FTransform Pose = Bones[ForearmIndex].RefPoseTransform;
+			Pose.Rotation.Roll += 30.0f;
+			Component.SetBoneLocalTransform(ForearmIndex, Pose);
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Reset Forearm"))
+			Component.SetBoneLocalTransform(ForearmIndex, Bones[ForearmIndex].RefPoseTransform);
 	}
 
 	// 클래스 계층을 따라 올라가며 각 단계의 프로퍼티를 표시
@@ -1350,6 +1454,13 @@ void FDetailsPanel::OnRender()
 			ImGui::PushID(TargetComponent);
 			ImGui::SeparatorText("Component Properties");
 			DrawProperties(TargetComponent, CustomFont);
+			if (USkeletalMeshComponent* SkeletalComponent = Cast<USkeletalMeshComponent>(TargetComponent))
+			{
+				USkeletalMesh* Mesh = SkeletalComponent->GetSkeletalMesh();
+				if (Mesh && OpenSkeletalMeshViewer && ImGui::Button("Edit Skeletal Mesh"))
+					OpenSkeletalMeshViewer(Mesh);
+				DrawSkinningTestActions(*SkeletalComponent);
+			}
 
 			if (UScriptComponent* ScriptComponent = Cast<UScriptComponent>(TargetComponent))
 			{

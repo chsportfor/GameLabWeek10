@@ -6,6 +6,7 @@
 #include "GameFramework/Actor/ParticleActor.h"
 #include "GameFramework/Actor/PlayerActor.h"
 #include "GameFramework/Actor/StaticMeshActor.h"
+#include "GameFramework/Actor/SkeletalMeshActor.h"
 #include "GameFramework/Actor/LightActorBase.h"
 #include "GameFramework/Actor/TextRenderActor.h"
 #include "GameFramework/Actor/RectLightActor.h"
@@ -40,7 +41,7 @@ public:
 
 	int32 SelectedIndex = 0;
 
-	const char* Items[15] ={
+	const char* Items[16] ={
 		"Actor",
 		"Box",
 		"Capsule",
@@ -51,6 +52,7 @@ public:
 		"PointLight",
 		"RectLight",
 		"Sequence",
+		"SkeletalMesh",
 		"SkyLight",
 		"Sphere",
 		"SpotLight",
@@ -76,6 +78,7 @@ public:
 		APointLightActor::StaticClass(),
 		ARectLightActor::StaticClass(),
 		ASequenceActor::StaticClass(),
+		ASkeletalMeshActor::StaticClass(),
 		ASkyLightActor::StaticClass(),
 		ASphereActor::StaticClass(),
 		ASpotLightActor::StaticClass(),
