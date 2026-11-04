@@ -435,8 +435,9 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 		Lines.Add({ "Decal", TitleColor });
 		Lines.Add({ std::format("  CPU Pass: {:.3f} ms",
 			FStatRegistry::GetCurrentFrameMs(DecalStats::STAT_RenderCPU)), ValueColor });
-		Lines.Add({ std::format("  Total: {}  Draws: {}  Additive: {}",
+		Lines.Add({ std::format("  Total: {}  Visible: {}  Draws: {}  Additive: {}",
 			FStatRegistry::GetCounter(DecalStats::STAT_Total),
+			FStatRegistry::GetCounter(DecalStats::STAT_Visible),
 			FStatRegistry::GetCounter(DecalStats::STAT_DrawCalls),
 			FStatRegistry::GetCounter(DecalStats::STAT_AdditiveDrawCalls)), ValueColor });
 		Lines.Add({ std::format("  Projected Build: {:.3f} ms  Builds: {}  Vertices: {}",
