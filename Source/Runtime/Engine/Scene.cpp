@@ -8,10 +8,14 @@
 #include "Render/DecalSettings.h"
 #include "Core/Stats/DecalStats.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkinnedMeshComponent.h"
 
 // 투영 Decal이 찍힐 수 있는 Primitive인지 본다. 에디터 아이콘이나 Billboard가 움직여도 Decal을 다시 만들지 않는다.
+// 스켈레탈은 자세가 바뀌면 UpdateSkinning이 OnTransformDirty를 불러 여기를 거쳐 다시 잘린다.
 static bool CanReceiveProjectedDecal(const FPrimitiveSceneProxy* Proxy)
 {
+	if (Cast<USkinnedMeshComponent>(Proxy->GetComponent()))
+		return true;
 	const auto* StaticMeshComponent = Cast<UStaticMeshComponent>(Proxy->GetComponent());
 	return StaticMeshComponent && !StaticMeshComponent->IsEditorIcon();
 }

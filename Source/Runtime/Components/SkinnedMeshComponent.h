@@ -25,6 +25,9 @@ public:
 	FString GetMaterialSlotName(int32 SlotIndex) const override;
 	UMaterial* GetDefaultMaterial(int32 SlotIndex) const override;
 	FVertexBuffer* GetSkinnedVertexBuffer() const{return SkinnedVertexBuffer.get();}
+	// 투영 Decal이 현재 자세의 삼각형을 자를 때 쓴다. 컴포넌트 로컬 좌표다.
+	const TArray<FVertex>& GetSkinnedVertices() const { return SkinnedVertices; }
+	const TArray<uint32>& GetSkinnedIndices() const { return SkinnedIndices; }
 
 	// 부모 Proxy가 월드 Bounds를 계산할 때 스켈레탈 메시의 로컬 Bounds를 사용한다.
 	FBox CalcLocalBounds() const override

@@ -237,6 +237,16 @@ void UDecalComponent::PostEditChangeProperty(const FProperty& Property)
 	}
 }
 
+bool UDecalComponent::IsPropertyVisibleInDetails(const FProperty& Property) const
+{
+	// Additive는 조명 계산 뒤에 더해져 법선을 쓰지 않으므로 노말 슬롯을 숨긴다. 넣어 둔 값은 그대로 둔다.
+	if (bAdditive && Property.Name == "DecalNormalTexture")
+	{
+		return false;
+	}
+	return Super::IsPropertyVisibleInDetails(Property);
+}
+
 void UDecalComponent::OnTransformDirty()
 {
 	if (SceneProxy)
