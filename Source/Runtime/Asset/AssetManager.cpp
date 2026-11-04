@@ -12,9 +12,11 @@
 #include "Asset/ObjImporter/ObjImporter.h"
 #include "Asset/FBXImporter/FbxImporter.h"
 #include "Asset/FBXImporter/SkeletalMeshBake.h"
+#include "Components/SkinnedMeshComponent.h"
 
 #include "Render/GeometryGenerator.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/UObjectIterator.h"
 
 #include "Render/ImageLoader.h"
 #include "Core/ResourcePaths.h"
@@ -367,6 +369,9 @@ void UAssetManager::CreateDefaultMeshes()
 	FStaticMeshData* GizmoSphereData = FGeometryGenerator::GetMeshData("GizmoSphere");
 	RegisterAsset("GizmoSphere", CreateStaticMesh(GizmoSphereData));
 
+	FStaticMeshData* OctahedralBoneData = FGeometryGenerator::GetMeshData("OctahedralBone");
+	RegisterAsset("OctahedralBone", CreateStaticMesh(OctahedralBoneData));
+
 	const FParticleVertex Vertices[] =
 	{
 		{ FVector(0.0f, -0.5f,  0.5f), FVector2(0.0f, 0.0f) },
@@ -629,6 +634,214 @@ const FFbxAssetSet* UAssetManager::LoadFbxAssets(const FString& Path)
 
 	FbxAssets.Add(Key, std::move(Assets));
 	return FbxAssets.Find(Key);
+}
+
+bool UAssetManager::SaveSkeletalMesh(USkeletalMesh* Mesh)
+{
+	if (!Mesh || Mesh->MeshData.Meshes.IsEmpty())
+	{
+		HTR_LOG(Warning, "[FBX] Cannot save empty skeletal mesh");
+		return false;
+	}
+
+	fs::path SourceFile = Mesh->GetPath();
+	if (IsFbxBakePath(SourceFile))
+	{
+		SourceFile.replace_extension();
+	}
+
+	fs::path BinFile = SourceFile;
+	BinFile += ".bin";
+
+	if (!fs::exists(SourceFile) && !fs::exists(BinFile))
+	{
+		SourceFile = fs::path("Assets") / SourceFile;
+		BinFile = fs::path("Assets") / BinFile;
+	}
+
+	const bool bFbxExists = fs::exists(SourceFile);
+	const bool bBinExists = fs::exists(BinFile);
+
+	if (!bFbxExists && !bBinExists)
+	{
+		HTR_LOG(Error, "[FBX] Cannot save: Neither source FBX nor baked .bin exists for: {}", Mesh->GetPath());
+		return false;
+	}
+
+	int64 Stamp = 0;
+	if (bFbxExists)
+	{
+		std::error_code Error;
+		const auto SourceTime = fs::last_write_time(SourceFile, Error);
+		if (!Error)
+		{
+			Stamp = SourceTime.time_since_epoch().count();
+		}
+	}
+
+	const FString SourcePath = ToUTF8String(SourceFile);
+
+	// 기존 캐시된 FBX 데이터(동일 FBX 내의 스태틱 메시 등)를 보존하기 위해 기존 .bin 데이터 읽기
+	FFbxCookedData CookedData;
+	FSkeletalMeshBake::ReadBaked(SourcePath, std::nullopt, CookedData);
+	CookedData.SkeletalMesh = Mesh->MeshData;
+
+	// 디스크의 .bin 바이너리 파일로 직렬화하여 영구 저장
+	if (!FSkeletalMeshBake::WriteBakedDirect(BinFile, CookedData, Stamp))
+	{
+		HTR_LOG(Error, "[FBX] Failed to save .bin file: {}", BinFile.string());
+		return false;
+	}
+
+	// 현재 씬에 배치된 모든 스켈레탈 메시 컴포넌트들을 새로운 RefPose 및 스키닝에 맞춰 갱신
+	for (TObjectIterator<USkinnedMeshComponent> Itr; Itr; ++Itr)
+	{
+		USkinnedMeshComponent* Comp = *Itr;
+		if (Comp && Comp->GetSkeletalMesh() == Mesh)
+		{
+			Comp->ResetPoseToBindPose();
+			Comp->MarkRenderStateDirty();
+		}
+	}
+
+	Mesh->RebuildRenderData();
+	HTR_LOG(Info, "[FBX] Skeletal mesh successfully saved: {}", BinFile.string());
+	return true;
+}
+
+bool UAssetManager::RestoreSkeletalMeshToOriginalFBX(USkeletalMesh* Mesh)
+{
+	if (!Mesh)
+	{
+		HTR_LOG(Warning, "[FBX] Cannot restore null skeletal mesh");
+		return false;
+	}
+
+	fs::path SourceFile = Mesh->GetPath();
+	if (IsFbxBakePath(SourceFile))
+	{
+		SourceFile.replace_extension();
+	}
+	if (!fs::exists(SourceFile))
+	{
+		SourceFile = fs::path("Assets") / SourceFile;
+	}
+
+	if (!fs::exists(SourceFile))
+	{
+		HTR_LOG(Warning, "[FBX] Cannot restore: Original source FBX file does not exist for: {} (standalone .bin asset)", Mesh->GetPath());
+		return false;
+	}
+
+	std::error_code Error;
+	const auto SourceTime = fs::last_write_time(SourceFile, Error);
+	if (Error)
+	{
+		HTR_LOG(Error, "[FBX] Cannot get last write time for: {}", SourceFile.string());
+		return false;
+	}
+
+	const FString SourcePath = ToUTF8String(SourceFile);
+	const FString Key = MakeAssetKey(SourcePath);
+
+	// FBX Importer로 원본 FBX 파일 순수 재임포트
+	FFbxImporter Importer;
+	FFbxImportResult ImportResult = Importer.ImportFBX(SourcePath, Key);
+	if (!ImportResult.bSuccess)
+	{
+		HTR_LOG(Error, "[FBX] Failed to import original FBX: {}", SourcePath);
+		return false;
+	}
+
+	FFbxCookedData CleanData;
+	Importer.Cook(std::move(ImportResult), CleanData);
+	if (CleanData.SkeletalMesh.Meshes.IsEmpty())
+	{
+		HTR_LOG(Error, "[FBX] No skeletal mesh found in original FBX: {}", SourcePath);
+		return false;
+	}
+
+	// 1. 메모리의 MeshData 복원
+	Mesh->MeshData = CleanData.SkeletalMesh;
+	Mesh->RebuildRenderData();
+
+	// 2. 디스크의 .bin 캐시 파일도 원본 클린 데이터로 다시 Bake하여 저장
+	FSkeletalMeshBake::WriteBaked(SourcePath, SourceTime, CleanData);
+
+	// 3. 현재 씬의 컴포넌트들 갱신
+	for (TObjectIterator<USkinnedMeshComponent> Itr; Itr; ++Itr)
+	{
+		USkinnedMeshComponent* Comp = *Itr;
+		if (Comp && Comp->GetSkeletalMesh() == Mesh)
+		{
+			Comp->ResetPoseToBindPose();
+			Comp->MarkRenderStateDirty();
+		}
+	}
+
+	HTR_LOG(Info, "[FBX] Skeletal mesh restored to original FBX pose: {}", SourcePath);
+	return true;
+}
+
+USkeletalMesh* UAssetManager::SaveSkeletalMeshAsNewBin(USkeletalMesh* Mesh, const FString& NewAssetName, const FSkeletalMeshData& NewData)
+{
+	if (!Mesh || NewAssetName.empty() || NewData.Meshes.IsEmpty())
+	{
+		HTR_LOG(Warning, "[FBX] Invalid parameters for SaveSkeletalMeshAsNewBin");
+		return nullptr;
+	}
+
+	fs::path SourceFile = Mesh->GetPath();
+	if (IsFbxBakePath(SourceFile))
+	{
+		SourceFile.replace_extension();
+	}
+	if (!fs::exists(SourceFile))
+	{
+		SourceFile = fs::path("Assets") / SourceFile;
+	}
+
+	fs::path ParentDir = SourceFile.parent_path();
+	if (ParentDir.empty())
+	{
+		ParentDir = fs::path("Assets") / "Models";
+	}
+
+	FString CleanName = NewAssetName;
+	if (CleanName.ends_with(".bin")) CleanName = CleanName.substr(0, CleanName.length() - 4);
+	if (CleanName.ends_with(".fbx")) CleanName = CleanName.substr(0, CleanName.length() - 4);
+	CleanName += ".fbx.bin";
+
+	fs::path TargetBinPath = ParentDir / CleanName;
+
+	FFbxCookedData NewCookedData;
+	const FString SourcePath = ToUTF8String(SourceFile);
+	FSkeletalMeshBake::ReadBaked(SourcePath, std::nullopt, NewCookedData);
+	NewCookedData.SkeletalMesh = NewData;
+
+	int64 Stamp = 0;
+	std::error_code Error;
+	if (fs::exists(SourceFile))
+	{
+		auto ST = fs::last_write_time(SourceFile, Error);
+		if (!Error) Stamp = ST.time_since_epoch().count();
+	}
+
+	if (!FSkeletalMeshBake::WriteBakedDirect(TargetBinPath, NewCookedData, Stamp))
+	{
+		HTR_LOG(Error, "[FBX] Failed to write new bin file: {}", TargetBinPath.string());
+		return nullptr;
+	}
+
+	const FString TargetBinPathStr = ToUTF8String(TargetBinPath);
+	const FFbxAssetSet* NewAssetSet = LoadFbxAssets(TargetBinPathStr);
+	if (NewAssetSet && NewAssetSet->SkeletalMesh)
+	{
+		HTR_LOG(Info, "[FBX] Successfully saved and registered new skeletal mesh asset: {}", TargetBinPathStr);
+		return NewAssetSet->SkeletalMesh;
+	}
+
+	return nullptr;
 }
 
 
