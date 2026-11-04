@@ -155,7 +155,7 @@ void USkinnedMeshComponent::UpdateSkinning()
 					SkinNormal.Add(FVector::ZeroVector);
 					continue;
 				}
-				// Keep the skinned vertex in component space for rendering, picking, and outlines.
+				// 렌더링, 피킹, 외곽선이 모두 컴포넌트 로컬 공간의 스키닝 정점을 사용한다.
 				const FMatrix SkinMatrix = InvBindArray[BoneIndex] * CurrentGlobalMatrices[BoneIndex];
 				FMatrix NormalMatrix = SkinMatrix.Inverse().GetTransposed();		// Normal의 경우는 NormalMap 적용처럼 Scale 변환 시 왜곡될수 있으므로 역전치 적용해야 함
 				FVector SkinnedPosition = SkinMatrix.TransformPosition(Vertex.Position);
@@ -181,7 +181,7 @@ void USkinnedMeshComponent::UpdateSkinning()
 			}
 			else
 			{
-				// Unweighted vertices follow the mesh node instead of a bone.
+				// 본 가중치가 없는 정점에는 메시 노드의 변환을 적용한다.
 				Vertex.Position = Mesh.MeshTransform.TransformPosition(Vertex.Position);
 				Vertex.Normal = MeshNormalMatrix.TransformVector(Vertex.Normal).GetSafeNormal();
 			}

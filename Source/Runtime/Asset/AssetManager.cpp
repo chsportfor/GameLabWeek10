@@ -527,21 +527,41 @@ UStaticMesh* UAssetManager::LoadObjStaticMesh(const FString& Path)
 	return Mesh;
 }
 
+bool UAssetManager::IsFbxBakePath(const fs::path& Path)
+{
+	return _stricmp(Path.extension().string().c_str(), ".bin") == 0 &&
+		_stricmp(Path.stem().extension().string().c_str(), ".fbx") == 0;
+}
+
 const FFbxAssetSet* UAssetManager::LoadFbxAssets(const FString& Path)
 {
-	const FString Key = MakeAssetKey(Path);
+	fs::path SourceFile(std::u8string(Path.begin(), Path.end()));
+	const bool bOpenBake = IsFbxBakePath(SourceFile);
+	if (bOpenBake) SourceFile.replace_extension();
+
+	const FString SourcePath = bOpenBake ? ToUTF8String(SourceFile) : Path;
+	const FString Key = MakeAssetKey(SourcePath);
 	if (const FFbxAssetSet* Cached = FbxAssets.Find(Key))
 		return Cached;
 
-	const auto SourceFile = std::filesystem::path(std::u8string(Path.begin(), Path.end()));
 	std::error_code SourceError;
-	const auto SourceTime = std::filesystem::last_write_time(SourceFile, SourceError);
+	const auto SourceTime = fs::last_write_time(SourceFile, SourceError);
+	const bool bStandaloneBake = bOpenBake && SourceError == std::errc::no_such_file_or_directory;
+	const std::optional<fs::file_time_type> ExpectedSourceTime =
+		SourceError ? std::nullopt : std::optional{SourceTime};
 	FFbxCookedData Data;
-	const bool LoadedFromBake = !SourceError && FSkeletalMeshBake::ReadBaked(Path, SourceTime, Data);
+	const bool LoadedFromBake = (!SourceError || bStandaloneBake) &&
+		FSkeletalMeshBake::ReadBaked(SourcePath, ExpectedSourceTime, Data);
 	if (!LoadedFromBake)
 	{
+		if (bOpenBake && SourceError)
+		{
+			HTR_LOG(Error, "[FBX] Cannot load bake without source FBX: {}", Path);
+			return nullptr;
+		}
+
 		FFbxImporter Importer;
-		FFbxImportResult ImportResult = Importer.ImportFBX(Path, Key);
+		FFbxImportResult ImportResult = Importer.ImportFBX(SourcePath, Key);
 		if (!ImportResult.bSuccess)
 		{
 			HTR_LOG(Error, "[FBX] Scene import failed: {}", Path);
@@ -599,13 +619,13 @@ const FFbxAssetSet* UAssetManager::LoadFbxAssets(const FString& Path)
 			}
 			RegisterAsset(StaticKey, Mesh);
 		}
-		// Older level files may still use the index-and-node asset key.
+		// 이전 레벨 파일이 저장한 인덱스·노드 이름 기반 키도 같은 에셋을 가리키도록 한다.
 		AssetMap[StaticPrefix + "_" + Name] = Mesh;
 		Assets.StaticMeshes.Add(FFbxStaticAsset{Part.NodeName, Part.NodeTransform, Mesh});
 	}
 
 	if (!LoadedFromBake && !SourceError)
-		FSkeletalMeshBake::WriteBaked(Path, SourceTime, Data);
+		FSkeletalMeshBake::WriteBaked(SourcePath, SourceTime, Data);
 
 	FbxAssets.Add(Key, std::move(Assets));
 	return FbxAssets.Find(Key);

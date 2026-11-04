@@ -6,7 +6,7 @@
 struct FFbxStaticMeshPart
 {
 	FString NodeName;
-	// The mesh data stays local. This transform places the node in the imported scene.
+	// 메시 데이터는 로컬 공간에 저장하고, 이 변환은 가져온 씬에서 노드를 배치할 때 사용한다.
 	FMatrix NodeTransform = FMatrix::Identity;
 	FStaticMeshData MeshData;
 };

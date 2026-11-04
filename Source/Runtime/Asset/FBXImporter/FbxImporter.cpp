@@ -170,7 +170,7 @@ FFbxImportResult FFbxImporter::ImportFBX(const FString& Path, const FString& Sce
 		return FbxResult;
 	}      
 
-	// FBX axis strings specify right, up, then forward. The engine uses +Y, +Z, +X.
+	// FBX 축 문자열은 오른쪽, 위쪽, 앞쪽 순서다. 엔진은 각각 +Y, +Z, +X를 사용한다.
 	FbxAxisSystem EngineAxes;
 	if (!FbxAxisSystem::ParseAxisSystem("yzx", EngineAxes))
 	{
@@ -180,7 +180,7 @@ FFbxImportResult FFbxImporter::ImportFBX(const FString& Path, const FString& Sce
 		return FbxResult;
 	}
 
-	// Normalize the whole scene before extracting mesh, cluster, and bind-pose data.
+	// 메시, 클러스터, 바인드 포즈를 추출하기 전에 씬 전체를 엔진의 축과 단위로 변환한다.
 	if (pFbxScene->GetGlobalSettings().GetAxisSystem() != EngineAxes)
 	{
 		EngineAxes.DeepConvertScene(pFbxScene);
@@ -302,7 +302,7 @@ void FFbxImporter::ProcessMeshNode(FbxNode* Node, const TMap<FbxNode*, int32>& B
 					continue;
 				}
 
-				// A rigid part under a bone follows that bone like a fully weighted part.
+				// 본에 붙은 비스키닝 파트는 그 본의 가중치를 1로 설정해 함께 움직이게 한다.
 				for (FSkeletalVertex& Vertex : Part.Vertices)
 				{
 					Vertex.BoneIndices[0] = static_cast<uint32>(*AttachmentBone);

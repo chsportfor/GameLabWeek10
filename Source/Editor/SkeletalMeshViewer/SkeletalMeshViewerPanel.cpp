@@ -54,7 +54,7 @@ bool FSkeletalMeshViewerPanel::OpenAsset(const FString& Path)
 	const FFbxAssetSet* Assets = UAssetManager::Get().LoadFbxAssets(Path);
 	if (!Assets)
 	{
-		OpenAssetMessage = "Could not import FBX: " + Path;
+		OpenAssetMessage = "Could not open FBX asset: " + Path;
 		SetOpen(true);
 		RequestFocus();
 		return false;
@@ -80,6 +80,7 @@ void FSkeletalMeshViewerPanel::ReleaseResources()
 	delete BoneGizmoTarget;
 	BoneGizmoTarget = nullptr;
 	PreviewMaterials.Reset();
+	VisibleStaticMeshes.Reset();
 	PreviewLighting.reset();
 	PreviewLightGrid.reset();
 	OpenedMeshes.Reset();
@@ -214,7 +215,18 @@ void FSkeletalMeshViewerPanel::FocusOnMesh()
 		return;
 	}
 
-	const FBox& Bounds = PreviewBounds;
+	FBox Bounds = PreviewBounds;
+	if (!VisibleStaticMeshes.IsEmpty())
+	{
+		if (const FFbxAssetSet* Assets = UAssetManager::Get().FindFbxAssets(SelectedMesh->GetPath()))
+		{
+			for (const FFbxStaticAsset& Part : Assets->StaticMeshes)
+			{
+				if (Part.Mesh && VisibleStaticMeshes.Find(Part.Mesh) != INDEX_NONE)
+					Bounds.Expand(Part.Mesh->GetRenderBounds().GetWorldAABB(Part.NodeTransform));
+			}
+		}
+	}
 	if (Bounds.Min.X <= Bounds.Max.X)
 	{
 		TargetPosition = (Bounds.Min + Bounds.Max) * 0.5f;
@@ -279,12 +291,12 @@ void FSkeletalMeshViewerPanel::ResizeViewport(uint32 NewWidth, uint32 NewHeight)
 	Desc.SampleDesc.Count = 1;
 	Desc.Usage = D3D11_USAGE_DEFAULT;
 
-	// Color Target
+	// 색상 렌더 타깃
 	Desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 	Desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
 	ColorTarget = RenderCommand::CreateTexture2D(Desc);
 
-	// Depth Target
+	// 깊이 렌더 타깃
 	Desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
 	Desc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
 	DepthTarget = RenderCommand::CreateTexture2D(Desc);
@@ -382,7 +394,7 @@ void FSkeletalMeshViewerPanel::HandleInput(float DeltaTime)
 		return;
 	}
 
-	// 3. 우클릭 조작 (First Person Free-Flight & Look Around)
+	// 3. 우클릭으로 1인칭 카메라를 이동하고 시점을 회전한다.
 	if (bRightMouseDown && !IO.KeyAlt)
 	{
 		CameraYaw += IO.MouseDelta.x * 0.35f;
@@ -448,7 +460,7 @@ void FSkeletalMeshViewerPanel::HandleInput(float DeltaTime)
 		TargetPosition += PanDelta;
 	}
 
-	// 6. 마우스 휠 스크롤: 줌 (Dolly Zoom)
+	// 6. 마우스 휠로 카메라를 앞뒤로 이동해 확대하거나 축소한다.
 	if (std::abs(IO.MouseWheel) > 0.01f)
 	{
 		const float Step = std::max(CameraDistance * 0.15f, MeshRadius * 0.005f);
@@ -477,6 +489,42 @@ void FSkeletalMeshViewerPanel::UpdateCamera(float DeltaTime)
 
 	CachedViewMatrix = ViewInfo.GetViewMatrix();
 	CachedProjMatrix = ViewInfo.GetPerspectiveMatrix();
+}
+
+void FSkeletalMeshViewerPanel::AppendStaticPreviewPackets(FRenderQueue& Queue, const FMatrix& PreviewWorld) const
+{
+	if (VisibleStaticMeshes.IsEmpty()) return;
+	const FFbxAssetSet* Assets = UAssetManager::Get().FindFbxAssets(SelectedMesh->GetPath());
+	if (!Assets) return;
+
+	for (const FFbxStaticAsset& Part : Assets->StaticMeshes)
+	{
+		UStaticMesh* Mesh = Part.Mesh;
+		if (!Mesh || VisibleStaticMeshes.Find(Mesh) == INDEX_NONE) continue;
+		const FIndexBuffer* IndexBuffer = Mesh->GetIndexBuffer(0);
+		if (!Mesh->GetVertexBuffer(0) || !IndexBuffer) continue;
+
+		// FBX 노드의 원래 배치에 프리뷰 컴포넌트의 월드 변환을 적용한다.
+		const FMatrix* Model = Queue.StoreWorldMatrix(Part.NodeTransform * PreviewWorld);
+		const float CameraDistance = (Model->TransformPosition(FVector::ZeroVector) - CachedCameraLocation).Length();
+		const uint32 TotalIndices = IndexBuffer->GetIndexCount();
+		for (const FStaticMeshSection& Section : Mesh->GetMeshData().Sections)
+		{
+			if (Section.IndexCount == 0 || Section.StartIndex > TotalIndices ||
+				Section.IndexCount > TotalIndices - Section.StartIndex)
+				continue;
+			UMaterial* Material = Mesh->GetMaterial(Section.MaterialSlotIndex);
+			if (!Material) continue;
+
+			FRenderPacket& Packet = Queue.AddDefaulted_GetRef();
+			Packet.Model = Model;
+			Packet.Mesh = Mesh;
+			Packet.Material = Material;
+			Packet.StartIndex = Section.StartIndex;
+			Packet.IndexCount = Section.IndexCount;
+			Packet.CameraToParticleDistance = CameraDistance;
+		}
+	}
 }
 
 void FSkeletalMeshViewerPanel::RenderPreview()
@@ -548,11 +596,12 @@ void FSkeletalMeshViewerPanel::RenderPreview()
 	if (PreviewComponent && SelectedMesh)
 	{
 		FRenderQueue RenderQueue;
+		const FMatrix PreviewWorld = PreviewComponent->GetWorldMatrix();
 		FVertexBuffer* VertexBuffer = PreviewComponent->GetSkinnedVertexBuffer();
 		FIndexBuffer* IndexBuffer = SelectedMesh->IndexBuffer.get();
-		if (VertexBuffer && IndexBuffer && PreviewLighting && PreviewLightGrid)
+		if (VertexBuffer && IndexBuffer)
 		{
-			const FMatrix* Model = RenderQueue.StoreWorldMatrix(PreviewComponent->GetWorldMatrix());
+			const FMatrix* Model = RenderQueue.StoreWorldMatrix(PreviewWorld);
 			uint32 BaseIndex = 0;
 			uint32 BaseMaterial = 0;
 			for (const FSkeletalMesh& Part : SelectedMesh->MeshData.Meshes)
@@ -582,7 +631,11 @@ void FSkeletalMeshViewerPanel::RenderPreview()
 					Packet.CameraToParticleDistance = (PartWorldOrigin - CachedCameraLocation).Length();
 				}
 			}
+		}
 
+		AppendStaticPreviewPackets(RenderQueue, PreviewWorld);
+		if (!RenderQueue.IsEmpty() && PreviewLighting && PreviewLightGrid)
+		{
 			const FLightGridConstants LightGrid{};
 			RenderCommand::UpdateBufferData(PreviewLighting.get(), &LightingConstants);
 			RenderCommand::UpdateBufferData(PreviewLightGrid.get(), &LightGrid);
@@ -996,7 +1049,7 @@ void FSkeletalMeshViewerPanel::DrawSkeletonOverlay(const ImVec2& ViewportOrigin,
 					ParentRotMat.SetAxis(1, FVector(ParentWorldMat.M[1][0], ParentWorldMat.M[1][1], ParentWorldMat.M[1][2]).GetSafeNormal());
 					ParentRotMat.SetAxis(2, FVector(ParentWorldMat.M[2][0], ParentWorldMat.M[2][1], ParentWorldMat.M[2][2]).GetSafeNormal());
 
-					// Row-vector 규약: WorldRot = LocalRot * ParentRot => LocalRot = WorldRot * ParentRot^T
+					// 행벡터 규약에서 월드 회전에 부모 회전의 전치 행렬을 곱하면 로컬 회전이 된다.
 					const FMatrix NewLocalRotMat = NewWorldRotMat * ParentRotMat.GetTransposed();
 					NewLocalTf.Rotation = MatrixToRotator(NewLocalRotMat);
 				}
@@ -1225,7 +1278,7 @@ void FSkeletalMeshViewerPanel::DrawSkeletonOverlay(const ImVec2& ViewportOrigin,
 		}
 		else if (BoneInFront[ParentIdx] && BoneInFront[i])
 		{
-			// Line 모드
+			// 선 표시 모드
 			DrawList->AddLine(BoneScreenPts[ParentIdx], BoneScreenPts[i], ConeWireColor, WireThickness + 0.6f);
 		}
 	}
@@ -1435,10 +1488,23 @@ void FSkeletalMeshViewerPanel::DrawMeshDetailsUI()
 	{
 		for (const FFbxStaticAsset& Part : Assets->StaticMeshes)
 		{
+			if (!Part.Mesh) continue;
 			const FString& AssetPath = Part.Mesh->GetPath();
 			const FString AssetName = AssetPath.substr(AssetPath.find_last_of('/') + 1);
-			ImGui::BulletText("%s", AssetName.c_str());
+			const int32 VisibleIndex = VisibleStaticMeshes.Find(Part.Mesh);
+			bool bVisible = VisibleIndex != INDEX_NONE;
+			ImGui::PushID(Part.Mesh);
+			if (ImGui::Checkbox("##ShowStaticMesh", &bVisible))
+			{
+				if (bVisible)
+					VisibleStaticMeshes.Add(Part.Mesh);
+				else
+					VisibleStaticMeshes.RemoveAt(VisibleIndex);
+			}
+			ImGui::SameLine();
+			ImGui::TextUnformatted(AssetName.c_str());
 			if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", AssetPath.c_str());
+			ImGui::PopID();
 		}
 	}
 

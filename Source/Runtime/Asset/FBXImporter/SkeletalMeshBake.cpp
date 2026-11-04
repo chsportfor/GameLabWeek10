@@ -11,7 +11,7 @@
 namespace
 {
 	constexpr uint32 BakeMagic = 0x4B424B53; // SKBK
-	// Increment when the binary layout or the FBX import/cook rules change.
+	// 바이너리 형식이나 FBX 임포트·쿠킹 규칙이 바뀌면 버전을 올린다.
 	constexpr uint32 BakeVersion = 3;
 
 	class FBakeReader
@@ -127,7 +127,7 @@ namespace
 		std::ofstream& Stream;
 	};
 
-	// Use one field order for both readers and writers.
+	// 읽기와 쓰기에서 같은 필드 순서를 사용한다.
 	template<typename A, typename T>
 	bool TransferSkeletalMesh(A& Archive, T& Data)
 	{
@@ -228,7 +228,7 @@ namespace
 	}
 }
 
-bool FSkeletalMeshBake::ReadBaked(const FString& SourcePath, std::filesystem::file_time_type SourceTime, FFbxCookedData& OutData)
+bool FSkeletalMeshBake::ReadBaked(const FString& SourcePath, std::optional<std::filesystem::file_time_type> ExpectedSourceTime, FFbxCookedData& OutData)
 {
 	auto BinPath = SourceFile(SourcePath);
 	BinPath += ".bin";
@@ -245,7 +245,7 @@ bool FSkeletalMeshBake::ReadBaked(const FString& SourcePath, std::filesystem::fi
 	FFbxCookedData Data;
 	if (!Reader.Pod(Magic) || Magic != BakeMagic ||
 		!Reader.Pod(Version) || Version != BakeVersion ||
-		!Reader.Pod(Stamp) || Stamp != SourceTime.time_since_epoch().count() ||
+		!Reader.Pod(Stamp) || (ExpectedSourceTime && Stamp != ExpectedSourceTime->time_since_epoch().count()) ||
 		!TransferMeshData(Reader, Data) || !Reader.AtEnd() || !Validate(Data))
 		return false;
 

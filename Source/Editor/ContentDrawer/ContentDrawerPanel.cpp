@@ -158,7 +158,8 @@ void FContentDrawerPanel::OnRender()
 					{
 						CurrentPath /= Path.filename(); // 하위 폴더로 이동
 					}
-					else if (_stricmp(Path.extension().string().c_str(), ".fbx") == 0 && OnOpenSkeletalMesh)
+					else if (OnOpenSkeletalMesh && (_stricmp(Path.extension().string().c_str(), ".fbx") == 0 ||
+						UAssetManager::IsFbxBakePath(Path)))
 					{
 						OnOpenSkeletalMesh(PathString);
 					}

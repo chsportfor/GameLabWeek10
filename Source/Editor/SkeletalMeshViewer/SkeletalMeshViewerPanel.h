@@ -53,6 +53,7 @@ private:
 	FTransform GetBoneLocalTransform(int32 BoneIndex) const;
 	UMaterial* GetPreviewMaterial(int32 SlotIndex) const;
 	void SetPreviewSampler(int32 SlotIndex, ESamplerState Sampler);
+	void AppendStaticPreviewPackets(FRenderQueue& Queue, const FMatrix& PreviewWorld) const;
 	void UpdateCamera(float DeltaTime);
 	void HandleInput(float DeltaTime);
 
@@ -78,12 +79,13 @@ private:
 	FGridRenderer* GridRenderer = nullptr;
 	FGizmoRenderer* GizmoRenderer = nullptr;
 
-	// Transient preview objects are released before editor shutdown.
+	// 임시 프리뷰 객체는 에디터가 종료되기 전에 해제한다.
 	USkeletalMeshComponent* PreviewComponent = nullptr;
 	USceneComponent* BoneGizmoTarget = nullptr;
 	FGizmo BoneGizmo;
 	USkeletalMesh* SelectedMesh = nullptr;
 	TArray<TUniquePtr<UMaterial>> PreviewMaterials;
+	TArray<UStaticMesh*> VisibleStaticMeshes;
 	TUniquePtr<FConstantBuffer> PreviewLighting;
 	TUniquePtr<FConstantBuffer> PreviewLightGrid;
 	FBox PreviewBounds{};
@@ -113,7 +115,7 @@ private:
 	bool bPreviewSettingsOpen = true;
 	bool bResetLayout = false;
 
-	// Orbit & Fly 카메라 (에디터 뷰포트와 100% 동일한 조작계)
+	// 레벨 에디터와 같은 공전 및 자유 이동 카메라 조작을 사용한다.
 	FVector CameraLocation = FVector(-250.0f, -250.0f, 150.0f);
 	FVector TargetPosition = FVector::ZeroVector;
 	float CameraDistance = 250.0f;
@@ -125,7 +127,7 @@ private:
 	FMatrix CachedViewMatrix = FMatrix::Identity;
 	FMatrix CachedProjMatrix = FMatrix::Identity;
 
-	// 언리얼 스타일 프리뷰 라이팅 (Directional + SkyLight / Ambient)
+	// 미리보기의 방향광과 하늘광 설정이다.
 	bool bEnableDirectionalLight = true;
 	float LightYaw = 45.0f;
 	float LightPitch = 45.0f;

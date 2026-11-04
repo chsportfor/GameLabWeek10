@@ -71,6 +71,7 @@ public:
 	UTexture2D* LoadTexture(const FString& InPath, bool bGenerateMips = true);
 	UFont* LoadFontAtlas(const FString& JsonPath, const FString& AtlasTexturePath);
 	static UStaticMesh* LoadObjStaticMesh(const FString& Path);
+	static bool IsFbxBakePath(const fs::path& Path);
 	const FFbxAssetSet* LoadFbxAssets(const FString& Path);
 	const FFbxAssetSet* FindFbxAssets(const FString& Key) const { return FbxAssets.Find(Key); }
 
