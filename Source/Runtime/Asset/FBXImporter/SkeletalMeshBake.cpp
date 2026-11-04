@@ -1,7 +1,7 @@
 #include "EnginePCH.h"
 #include "SkeletalMeshBake.h"
 
-#include "Render/SkeletalMeshData.h"
+#include "Asset/FBXImporter/FbxImportData.h"
 
 #include <cmath>
 #include <fstream>
@@ -12,7 +12,7 @@ namespace
 {
 	constexpr uint32 BakeMagic = 0x4B424B53; // SKBK
 	// Increment when the binary layout or the FBX import/cook rules change.
-	constexpr uint32 BakeVersion = 1;
+	constexpr uint32 BakeVersion = 3;
 
 	class FBakeReader
 	{
@@ -129,7 +129,7 @@ namespace
 
 	// Use one field order for both readers and writers.
 	template<typename A, typename T>
-	bool TransferMeshData(A& Archive, T& Data)
+	bool TransferSkeletalMesh(A& Archive, T& Data)
 	{
 		return Archive.Records(Data.Bones, [](auto& Ar, auto& Bone)
 		{
@@ -152,7 +152,24 @@ namespace
 		});
 	}
 
-	bool Validate(const FSkeletalMeshData& Data)
+	template<typename A, typename T>
+	bool TransferMeshData(A& Archive, T& Data)
+	{
+		return TransferSkeletalMesh(Archive, Data.SkeletalMesh) &&
+			Archive.Records(Data.StaticMeshes, [](auto& Ar, auto& Part)
+			{
+				auto& Mesh = Part.MeshData;
+				return Ar.String(Part.NodeName) && Ar.Pod(Part.NodeTransform.M) &&
+					Ar.Array(Mesh.Vertices) && Ar.Array(Mesh.Indices) && Ar.Array(Mesh.Sections) &&
+					Ar.Pod(Mesh.AABB) && Ar.Records(Mesh.MaterialSlots, [](auto& SlotAr, auto& Slot)
+					{
+						return SlotAr.String(Slot.Name) && SlotAr.Pod(Slot.BaseColor) &&
+							SlotAr.String(Slot.DiffuseTexturePath) && SlotAr.String(Slot.NormalTexturePath);
+					});
+			});
+	}
+
+	bool ValidateSkeletalMesh(const FSkeletalMeshData& Data)
 	{
 		for (int32 Index = 0; Index < Data.Bones.Num(); ++Index)
 		{
@@ -193,13 +210,25 @@ namespace
 		return HasTriangles;
 	}
 
+	bool Validate(const FFbxCookedData& Data)
+	{
+		if (!Data.SkeletalMesh.Meshes.IsEmpty() && !ValidateSkeletalMesh(Data.SkeletalMesh))
+			return false;
+		for (const FFbxStaticMeshPart& Part : Data.StaticMeshes)
+		{
+			FString Error;
+			if (!Part.MeshData.Validate(Error)) return false;
+		}
+		return !Data.SkeletalMesh.Meshes.IsEmpty() || !Data.StaticMeshes.IsEmpty();
+	}
+
 	std::filesystem::path SourceFile(const FString& Path)
 	{
 		return std::filesystem::path(std::u8string(Path.begin(), Path.end()));
 	}
 }
 
-bool FSkeletalMeshBake::ReadBaked(const FString& SourcePath, std::filesystem::file_time_type SourceTime, FSkeletalMeshData& OutData)
+bool FSkeletalMeshBake::ReadBaked(const FString& SourcePath, std::filesystem::file_time_type SourceTime, FFbxCookedData& OutData)
 {
 	auto BinPath = SourceFile(SourcePath);
 	BinPath += ".bin";
@@ -213,7 +242,7 @@ bool FSkeletalMeshBake::ReadBaked(const FString& SourcePath, std::filesystem::fi
 	uint32 Magic = 0;
 	uint32 Version = 0;
 	int64 Stamp = 0;
-	FSkeletalMeshData Data;
+	FFbxCookedData Data;
 	if (!Reader.Pod(Magic) || Magic != BakeMagic ||
 		!Reader.Pod(Version) || Version != BakeVersion ||
 		!Reader.Pod(Stamp) || Stamp != SourceTime.time_since_epoch().count() ||
@@ -225,7 +254,7 @@ bool FSkeletalMeshBake::ReadBaked(const FString& SourcePath, std::filesystem::fi
 	return true;
 }
 
-void FSkeletalMeshBake::WriteBaked(const FString& SourcePath, std::filesystem::file_time_type SourceTime, const FSkeletalMeshData& Data)
+void FSkeletalMeshBake::WriteBaked(const FString& SourcePath, std::filesystem::file_time_type SourceTime, const FFbxCookedData& Data)
 {
 	const auto Source = SourceFile(SourcePath);
 	std::error_code Error;

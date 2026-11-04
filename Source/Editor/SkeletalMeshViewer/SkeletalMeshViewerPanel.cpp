@@ -51,9 +51,24 @@ bool FSkeletalMeshViewerPanel::Init()
 
 bool FSkeletalMeshViewerPanel::OpenAsset(const FString& Path)
 {
-	USkeletalMesh* Mesh = UAssetManager::Get().LoadFbxSkeletonMesh(Path);
-	if (!Mesh) return false;
-	OpenMesh(Mesh);
+	const FFbxAssetSet* Assets = UAssetManager::Get().LoadFbxAssets(Path);
+	if (!Assets)
+	{
+		OpenAssetMessage = "Could not import FBX: " + Path;
+		SetOpen(true);
+		RequestFocus();
+		return false;
+	}
+	if (Assets->SkeletalMesh)
+	{
+		OpenMesh(Assets->SkeletalMesh);
+		return true;
+	}
+
+	OpenAssetMessage = "Imported " + std::to_string(Assets->StaticMeshes.Num()) +
+		" static mesh assets. This FBX has no skeletal mesh to preview.";
+	SetOpen(true);
+	RequestFocus();
 	return true;
 }
 
@@ -80,6 +95,7 @@ void FSkeletalMeshViewerPanel::OpenMesh(USkeletalMesh* Mesh)
 	if (!Mesh)
 		return;
 
+	OpenAssetMessage.clear();
 	SetOpen(true);
 	RequestFocus();
 
@@ -536,18 +552,24 @@ void FSkeletalMeshViewerPanel::RenderPreview()
 		FIndexBuffer* IndexBuffer = SelectedMesh->IndexBuffer.get();
 		if (VertexBuffer && IndexBuffer && PreviewLighting && PreviewLightGrid)
 		{
+			const FMatrix* Model = RenderQueue.StoreWorldMatrix(PreviewComponent->GetWorldMatrix());
 			uint32 BaseIndex = 0;
 			uint32 BaseMaterial = 0;
 			for (const FSkeletalMesh& Part : SelectedMesh->MeshData.Meshes)
 			{
-				const FMatrix* Model = RenderQueue.StoreWorldMatrix(Part.MeshTransform * PreviewComponent->GetWorldMatrix());
+				const uint32 PartStartIndex = BaseIndex;
+				const uint32 PartStartMaterial = BaseMaterial;
 				const uint32 PartIndexCount = static_cast<uint32>(Part.Indices.Num());
+				BaseIndex += PartIndexCount;
+				BaseMaterial += static_cast<uint32>(Part.MaterialSlots.Num());
+
+				const FVector PartWorldOrigin = Model->TransformPosition(Part.MeshTransform.TransformPosition(FVector::ZeroVector));
 				for (const FSkeletalMeshSection& Section : Part.Sections)
 				{
 					if (Section.IndexCount == 0 || Section.StartIndex > PartIndexCount ||
 						Section.IndexCount > PartIndexCount - Section.StartIndex)
 						continue;
-					UMaterial* Material = GetPreviewMaterial(static_cast<int32>(BaseMaterial + Section.MaterialSlotIndex));
+					UMaterial* Material = GetPreviewMaterial(static_cast<int32>(PartStartMaterial + Section.MaterialSlotIndex));
 					if (!Material) continue;
 
 					FRenderPacket& Packet = RenderQueue.AddDefaulted_GetRef();
@@ -555,12 +577,10 @@ void FSkeletalMeshViewerPanel::RenderPreview()
 					Packet.VertexBuffer = VertexBuffer;
 					Packet.IndexBuffer = IndexBuffer;
 					Packet.Material = Material;
-					Packet.StartIndex = BaseIndex + Section.StartIndex;
+					Packet.StartIndex = PartStartIndex + Section.StartIndex;
 					Packet.IndexCount = Section.IndexCount;
-					Packet.CameraToParticleDistance = (Model->TransformPosition(FVector::ZeroVector) - CachedCameraLocation).Length();
+					Packet.CameraToParticleDistance = (PartWorldOrigin - CachedCameraLocation).Length();
 				}
-				BaseIndex += PartIndexCount;
-				BaseMaterial += static_cast<uint32>(Part.MaterialSlots.Num());
 			}
 
 			const FLightGridConstants LightGrid{};
@@ -633,6 +653,7 @@ void FSkeletalMeshViewerPanel::OnRender()
 	{
 		DrawToolbarUI();
 		DrawAssetTabBar();
+		if (!OpenAssetMessage.empty()) ImGui::TextWrapped("%s", OpenAssetMessage.c_str());
 
 		// 열려 있는 메시가 없을 때의 안내 화면
 		if (OpenedMeshes.Num() == 0 || !SelectedMesh)
@@ -1407,6 +1428,19 @@ void FSkeletalMeshViewerPanel::DrawMeshDetailsUI()
 	ImGui::Text("Triangles: %d", IndexCount / 3);
 	ImGui::Text("Sections: %d", SelectedMesh->Sections.Num());
 	ImGui::Text("Material Slots: %d", SelectedMesh->Materials.Num());
+
+	const FFbxAssetSet* Assets = UAssetManager::Get().FindFbxAssets(Path);
+	if (Assets && !Assets->StaticMeshes.IsEmpty() &&
+		ImGui::CollapsingHeader("Separate Static Meshes", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		for (const FFbxStaticAsset& Part : Assets->StaticMeshes)
+		{
+			const FString& AssetPath = Part.Mesh->GetPath();
+			const FString AssetName = AssetPath.substr(AssetPath.find_last_of('/') + 1);
+			ImGui::BulletText("%s", AssetName.c_str());
+			if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", AssetPath.c_str());
+		}
+	}
 
 	const FBox& Bounds = PreviewBounds;
 	const FVector Size = Bounds.Max - Bounds.Min;

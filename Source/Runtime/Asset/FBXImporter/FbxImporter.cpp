@@ -25,6 +25,26 @@ namespace
 		return std::filesystem::path(std::u8string(Path.begin(), Path.end()));
 	}
 
+	FStaticMeshData MakeStaticMeshData(const FSkeletalMesh& Part)
+	{
+		FStaticMeshData Data;
+		Data.Vertices.Reserve(Part.Vertices.Num());
+		Data.AABB = FBox{FVector(FLT_MAX, FLT_MAX, FLT_MAX), FVector(-FLT_MAX, -FLT_MAX, -FLT_MAX)};
+		for (const FSkeletalVertex& SourceVertex : Part.Vertices)
+		{
+			const FVertex& Vertex = SourceVertex.Vertex;
+			Data.Vertices.Add(Vertex);
+			Data.AABB.Expand(FBox{Vertex.Position, Vertex.Position});
+		}
+
+		Data.Indices = Part.Indices;
+		for (const FSkeletalMeshSection& Section : Part.Sections)
+			Data.Sections.Add(FStaticMeshSection{Section.StartIndex, Section.IndexCount, Section.MaterialSlotIndex});
+		for (const FSkeletalMaterialSlot& Slot : Part.MaterialSlots)
+			Data.MaterialSlots.Add(FStaticMaterialSlot{Slot.Name, Slot.BaseColor, Slot.BaseColorTexturePath, Slot.NormalTexturePath});
+		return Data;
+	}
+
 	FString ResolveTexturePath(FbxFileTexture* Texture, const FString& FbxPath)
 	{
 		if (!Texture) return {};
@@ -150,6 +170,26 @@ FFbxImportResult FFbxImporter::ImportFBX(const FString& Path, const FString& Sce
 		return FbxResult;
 	}      
 
+	// FBX axis strings specify right, up, then forward. The engine uses +Y, +Z, +X.
+	FbxAxisSystem EngineAxes;
+	if (!FbxAxisSystem::ParseAxisSystem("yzx", EngineAxes))
+	{
+		HTR_LOG(Error, "[FBX] Invalid engine axis system");
+		pFbxImporter->Destroy();
+		pFbxScene->Destroy();
+		return FbxResult;
+	}
+
+	// Normalize the whole scene before extracting mesh, cluster, and bind-pose data.
+	if (pFbxScene->GetGlobalSettings().GetAxisSystem() != EngineAxes)
+	{
+		EngineAxes.DeepConvertScene(pFbxScene);
+	}
+	if (pFbxScene->GetGlobalSettings().GetSystemUnit() != FbxSystemUnit::m)
+	{
+		FbxSystemUnit::m.ConvertScene(pFbxScene);
+	}
+
 	bool bTriangulated = Converter.Triangulate(pFbxScene, true);	// 삼각형화 진행
 	if (!bTriangulated)
 	{
@@ -222,11 +262,13 @@ void FFbxImporter::ProcessMeshNode(FbxNode* Node, const TMap<FbxNode*, int32>& B
 		if (NodeAttri && NodeAttri->GetAttributeType() == FbxNodeAttribute::EType::eMesh)
 		{
 			FbxMesh* Mesh = static_cast<FbxMesh*>(NodeAttri);
-			FSkeletalMesh SkeletalMesh = ProcessMesh(Mesh, BoneIndexByNode, FbxPath);
+			FSkeletalMesh Part = ProcessMesh(Mesh, BoneIndexByNode, FbxPath);
+			if (Part.Indices.IsEmpty()) continue;
+			const int32 SkinCount = Mesh->GetDeformerCount(FbxDeformer::eSkin);
 
 			FbxAMatrix MeshTransform = Node->EvaluateGlobalTransform();
 			bool bFoundBindTransform = false;
-			for (int SkinIndex = 0; SkinIndex < Mesh->GetDeformerCount(FbxDeformer::eSkin) && !bFoundBindTransform; ++SkinIndex)
+			for (int SkinIndex = 0; SkinIndex < SkinCount && !bFoundBindTransform; ++SkinIndex)
 			{
 				auto* Skin = static_cast<FbxSkin*>(Mesh->GetDeformer(SkinIndex, FbxDeformer::eSkin));
 				if (!Skin) continue;
@@ -245,8 +287,30 @@ void FFbxImporter::ProcessMeshNode(FbxNode* Node, const TMap<FbxNode*, int32>& B
 			Geometry.SetTRS(Node->GetGeometricTranslation(FbxNode::eSourcePivot),
 				Node->GetGeometricRotation(FbxNode::eSourcePivot),
 				Node->GetGeometricScaling(FbxNode::eSourcePivot));
-			SkeletalMesh.MeshTransform = ToEngineMatrix(MeshTransform * Geometry);
-			OutResult.Meshes.Add(SkeletalMesh);
+			Part.MeshTransform = ToEngineMatrix(MeshTransform * Geometry);
+
+			if (SkinCount == 0)
+			{
+				const int32* AttachmentBone = nullptr;
+				for (FbxNode* Ancestor = Node; Ancestor && !AttachmentBone; Ancestor = Ancestor->GetParent())
+					AttachmentBone = BoneIndexByNode.Find(Ancestor);
+
+				if (!AttachmentBone)
+				{
+					OutResult.StaticMeshes.Add(FFbxStaticMeshPart{
+						Node->GetName(), Part.MeshTransform, MakeStaticMeshData(Part)});
+					continue;
+				}
+
+				// A rigid part under a bone follows that bone like a fully weighted part.
+				for (FSkeletalVertex& Vertex : Part.Vertices)
+				{
+					Vertex.BoneIndices[0] = static_cast<uint32>(*AttachmentBone);
+					Vertex.BoneWeights[0] = 1.0f;
+				}
+			}
+
+			OutResult.Meshes.Add(std::move(Part));
 		}
 	}
 	for (int i = 0; i < Node->GetChildCount(); ++i) // 연결된 자식에 대해서 재귀적으로 순회
@@ -368,13 +432,16 @@ FSkeletalBone FFbxImporter::ProcessSkeleton(FbxNode* Node, const TMap<FbxNode*, 
 	}
 }
 
-void FFbxImporter::Cook(const FFbxImportResult& ImportResult, FSkeletalMeshData& OutData)
+void FFbxImporter::Cook(FFbxImportResult&& ImportResult, FFbxCookedData& Cooked)
 {
-	OutData.Meshes = ImportResult.Meshes;	// Import 결과 Meshes 채움
-	OutData.Bones = ImportResult.Bones;		// Import 결과 Bones 채움
+	Cooked.StaticMeshes = std::move(ImportResult.StaticMeshes);
+	FSkeletalMeshData& OutData = Cooked.SkeletalMesh;
+	OutData.Meshes = std::move(ImportResult.Meshes);
+	if (OutData.Meshes.IsEmpty()) return;
+	OutData.Bones = std::move(ImportResult.Bones);
 
 	TArray<FMatrix> GlobalRefMatrix; // 부모 기준 Transform 저장하기 위한 임시배열
-	GlobalRefMatrix.Reserve(ImportResult.Bones.Num());
+	GlobalRefMatrix.Reserve(OutData.Bones.Num());
 
 	for (int i = 0; i < OutData.Bones.Num(); i++)
 	{

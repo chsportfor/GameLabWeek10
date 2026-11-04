@@ -12,6 +12,19 @@ class UStaticMesh;
 class USkeletalMesh;
 class FShader;
 
+struct FFbxStaticAsset
+{
+	FString NodeName;
+	FMatrix NodeTransform = FMatrix::Identity;
+	UStaticMesh* Mesh = nullptr;
+};
+
+struct FFbxAssetSet
+{
+	USkeletalMesh* SkeletalMesh = nullptr;
+	TArray<FFbxStaticAsset> StaticMeshes;
+};
+
 namespace fs = std::filesystem;
 
 class UAssetManager : public UObject
@@ -58,7 +71,8 @@ public:
 	UTexture2D* LoadTexture(const FString& InPath, bool bGenerateMips = true);
 	UFont* LoadFontAtlas(const FString& JsonPath, const FString& AtlasTexturePath);
 	static UStaticMesh* LoadObjStaticMesh(const FString& Path);
-	USkeletalMesh* LoadFbxSkeletonMesh(const FString& Path);
+	const FFbxAssetSet* LoadFbxAssets(const FString& Path);
+	const FFbxAssetSet* FindFbxAssets(const FString& Key) const { return FbxAssets.Find(Key); }
 
 	FLODGenerateResult GenerateStaticMeshLODs(UStaticMesh& Mesh,const FLODGenerateRequest& Request);
 
@@ -72,6 +86,7 @@ public:
 private:
 	TMap<FString, FString> AssetPathMap;
 	TMap<FString, URenderAsset*> AssetMap;
+	TMap<FString, FFbxAssetSet> FbxAssets;
 
 	//TMap<FString, UStaticMesh*> MeshMap;	// KEY: FILE NAME OR 쉐입 첫글자 대문자
 	TMap<FString, TUniquePtr<FShader>> ShaderMap;	// KEY: FILE NAME

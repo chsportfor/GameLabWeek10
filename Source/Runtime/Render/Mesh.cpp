@@ -139,7 +139,7 @@ void USkeletalMesh::RebuildRenderData()
 		const FSkeletalMesh& Mesh = MeshData.Meshes[i];
 		for (int j = 0; j < Mesh.Vertices.Num(); j++)
 		{
-			const FVector& Position = Mesh.Vertices[j].Vertex.Position;
+			const FVector Position = Mesh.MeshTransform.TransformPosition(Mesh.Vertices[j].Vertex.Position);
 			if (!bHasVertex)
 			{
 				RenderBounds.Min = Position;

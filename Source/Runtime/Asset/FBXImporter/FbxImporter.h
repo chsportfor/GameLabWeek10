@@ -1,7 +1,7 @@
 #pragma once
 
 #include "EnginePCH.h"
-#include "Render/SkeletalMeshData.h"
+#include "Asset/FBXImporter/FbxImportData.h"
 
 #include <fbxsdk.h>
 
@@ -42,6 +42,7 @@ struct FFbxImportResult	// Fbx의 Import 결과로 나오는 값 구조체
 	// 본 순회와 메시 순회에서 수집한 결과. Cook에서 최종 데이터로 묶는다.
 	TArray<FSkeletalMesh> Meshes;
 	TArray<FSkeletalBone> Bones;
+	TArray<FFbxStaticMeshPart> StaticMeshes;
 };
 
 class FFbxImporter
@@ -58,7 +59,7 @@ public:
 	void BuildMeshVerticesAndIndices(FbxMesh* Mesh, const TMap<int32, FBoneInfluence>& InfluenceByControlPoint, FSkeletalMesh& SkeletalMesh);
 	void BuildInfluenceMap(FbxMesh* Mesh, const TMap<FbxNode*, int32>& BoneIndexByNode, TMap<int32, FBoneInfluence>& InfluenceByControlPoint);
 	void BuildMaterials(FbxMesh* Mesh, FSkeletalMesh& SkeletalMesh, const FString& FbxPath);
-	void Cook(const FFbxImportResult& ImportResult, FSkeletalMeshData& OutData);
+	void Cook(FFbxImportResult&& ImportResult, FFbxCookedData& Cooked);
 
 
 private:

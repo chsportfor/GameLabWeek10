@@ -18,6 +18,7 @@
 
 #include "Render/ImageLoader.h"
 #include "Core/ResourcePaths.h"
+#include <algorithm>
 #include <cctype>
 
 
@@ -293,7 +294,7 @@ void UAssetManager::LoadAsset(const FString& Key, const FString& Path) {
 	}
 	if (Extension == ".fbx")
 	{
-		LoadFbxSkeletonMesh(Path);
+		LoadFbxAssets(Path);
 	}
 }
 
@@ -439,6 +440,7 @@ void UAssetManager::CreateEditorArrowMaterial() {
 
 void UAssetManager::Shutdown()
 {
+	Get().FbxAssets.Empty();
 	Get().AssetMap.Empty();
 }
 
@@ -525,45 +527,88 @@ UStaticMesh* UAssetManager::LoadObjStaticMesh(const FString& Path)
 	return Mesh;
 }
 
-USkeletalMesh* UAssetManager::LoadFbxSkeletonMesh(const FString& Path)
+const FFbxAssetSet* UAssetManager::LoadFbxAssets(const FString& Path)
 {
 	const FString Key = MakeAssetKey(Path);
-	if (USkeletalMesh* Cached = GetAssetByPath<USkeletalMesh>(Key))
-	{
+	if (const FFbxAssetSet* Cached = FbxAssets.Find(Key))
 		return Cached;
-	}
 
+	const auto SourceFile = std::filesystem::path(std::u8string(Path.begin(), Path.end()));
 	std::error_code SourceError;
-	const auto SourceTime = std::filesystem::last_write_time(
-		std::filesystem::path(std::u8string(Path.begin(), Path.end())), SourceError);
-	FSkeletalMeshData Data;
+	const auto SourceTime = std::filesystem::last_write_time(SourceFile, SourceError);
+	FFbxCookedData Data;
 	const bool LoadedFromBake = !SourceError && FSkeletalMeshBake::ReadBaked(Path, SourceTime, Data);
 	if (!LoadedFromBake)
 	{
 		FFbxImporter Importer;
-		const FFbxImportResult ImportResult = Importer.ImportFBX(Path, Key);
+		FFbxImportResult ImportResult = Importer.ImportFBX(Path, Key);
 		if (!ImportResult.bSuccess)
 		{
-			HTR_LOG(Error, "[FBX] Skeletal mesh import failed: {}", Path);
+			HTR_LOG(Error, "[FBX] Scene import failed: {}", Path);
 			return nullptr;
 		}
-		Importer.Cook(ImportResult, Data);
+		Importer.Cook(std::move(ImportResult), Data);
 	}
-	USkeletalMesh* Mesh = CreateSkeletalMesh(&Data);
-	if (!Mesh)
+
+	if (Data.SkeletalMesh.Meshes.IsEmpty() && Data.StaticMeshes.IsEmpty())
 	{
-		HTR_LOG(Error, "[FBX] Skeletal mesh resource creation failed: {}", Path);
+		HTR_LOG(Warning, "[FBX] No renderable mesh in {}", Path);
 		return nullptr;
 	}
 
-	if (!LoadedFromBake && !SourceError)
+	FFbxAssetSet Assets;
+	if (!Data.SkeletalMesh.Meshes.IsEmpty())
 	{
-		FSkeletalMeshBake::WriteBaked(Path, SourceTime, Data);
+		Assets.SkeletalMesh = GetAssetByPath<USkeletalMesh>(Key);
+		if (!Assets.SkeletalMesh)
+		{
+			Assets.SkeletalMesh = CreateSkeletalMesh(&Data.SkeletalMesh);
+			if (!Assets.SkeletalMesh)
+			{
+				HTR_LOG(Error, "[FBX] Skeletal mesh resource creation failed: {}", Path);
+				return nullptr;
+			}
+			RegisterAsset(Key, Assets.SkeletalMesh);
+		}
 	}
 
-	// 생성에 성공한 에셋만 등록하고, 다음 로드에서는 캐시를 반환한다.
-	Get().RegisterAsset(Key, Mesh);
-	return Mesh;
+	const FString SourceName = ToUTF8String(SourceFile.stem());
+	for (int32 Index = 0; Index < Data.StaticMeshes.Num(); ++Index)
+	{
+		const FFbxStaticMeshPart& Part = Data.StaticMeshes[Index];
+		FString Name = Part.NodeName.empty() ? "Mesh" : Part.NodeName;
+		std::replace(Name.begin(), Name.end(), '/', '_');
+		std::replace(Name.begin(), Name.end(), '\\', '_');
+		const FString StaticPrefix = Key + "#Static/" + std::to_string(Index);
+		const FString StaticKey = StaticPrefix + "/" + SourceName + "_" + Name;
+
+		UStaticMesh* Mesh = GetAssetByPath<UStaticMesh>(StaticKey);
+		if (!Mesh)
+		{
+			FString Error;
+			if (!Part.MeshData.Validate(Error))
+			{
+				HTR_LOG(Error, "[FBX] Invalid static mesh {}: {}", StaticKey, Error);
+				return nullptr;
+			}
+			Mesh = CreateStaticMesh(&Part.MeshData);
+			if (!Mesh)
+			{
+				HTR_LOG(Error, "[FBX] Static mesh resource creation failed: {}", StaticKey);
+				return nullptr;
+			}
+			RegisterAsset(StaticKey, Mesh);
+		}
+		// Older level files may still use the index-and-node asset key.
+		AssetMap[StaticPrefix + "_" + Name] = Mesh;
+		Assets.StaticMeshes.Add(FFbxStaticAsset{Part.NodeName, Part.NodeTransform, Mesh});
+	}
+
+	if (!LoadedFromBake && !SourceError)
+		FSkeletalMeshBake::WriteBaked(Path, SourceTime, Data);
+
+	FbxAssets.Add(Key, std::move(Assets));
+	return FbxAssets.Find(Key);
 }
 
 

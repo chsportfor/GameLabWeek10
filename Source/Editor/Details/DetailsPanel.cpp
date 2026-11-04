@@ -215,6 +215,9 @@ namespace
 
 	FString GetAssetDisplayName(const FString& Path)
 	{
+		if (Path.find("#Static/") != FString::npos)
+			return Path.substr(Path.find_last_of('/') + 1);
+
 		fs::path AssetPath(Path);
 		if (AssetPath.stem() == "Atlas")
 		{

@@ -134,7 +134,7 @@ void USkinnedMeshComponent::UpdateSkinning()
 		const FSkeletalMesh& Mesh = SkeletalMesh->MeshData.Meshes[i];
 		const uint32 BaseVertex = static_cast<uint32>(ResultVertex.Num());
 		const TArray<FMatrix>& InvBindArray = Mesh.InverseBindPoseMat;
-		const FMatrix InverseMeshTransform = Mesh.MeshTransform.Inverse();
+		const FMatrix MeshNormalMatrix = Mesh.MeshTransform.Inverse().GetTransposed();
 		for (int j = 0; j < SkeletalMesh->MeshData.Meshes[i].Vertices.Num(); j++)
 		{
 			TArray<FVector> SkinPos;
@@ -155,8 +155,8 @@ void USkinnedMeshComponent::UpdateSkinning()
 					SkinNormal.Add(FVector::ZeroVector);
 					continue;
 				}
-				FMatrix InvBind = InvBindArray[BoneIndex];
-				FMatrix SkinMatrix = InvBind * CurrentGlobalMatrices[BoneIndex] * InverseMeshTransform;		// 기존 계산에서 Mesh 로컬 공간으로 되돌리는 InverseMeshTransform만 추가
+				// Keep the skinned vertex in component space for rendering, picking, and outlines.
+				const FMatrix SkinMatrix = InvBindArray[BoneIndex] * CurrentGlobalMatrices[BoneIndex];
 				FMatrix NormalMatrix = SkinMatrix.Inverse().GetTransposed();		// Normal의 경우는 NormalMap 적용처럼 Scale 변환 시 왜곡될수 있으므로 역전치 적용해야 함
 				FVector SkinnedPosition = SkinMatrix.TransformPosition(Vertex.Position);
 				FVector SkinnedNormal = NormalMatrix.TransformVector(Vertex.Normal);
@@ -174,11 +174,16 @@ void USkinnedMeshComponent::UpdateSkinning()
 				ResultNormal += (SkinNormal[k] * BoneWeight);
 				TotalWeight += BoneWeight;
 			}
-			// 영향 본이 없는 정점은 원래 위치를 유지한다.
 			if (TotalWeight > 0.0f)
 			{
 				Vertex.Position = ResultPos / TotalWeight;
 				Vertex.Normal = ResultNormal.GetSafeNormal();
+			}
+			else
+			{
+				// Unweighted vertices follow the mesh node instead of a bone.
+				Vertex.Position = Mesh.MeshTransform.TransformPosition(Vertex.Position);
+				Vertex.Normal = MeshNormalMatrix.TransformVector(Vertex.Normal).GetSafeNormal();
 			}
 			ResultVertex.Add(Vertex);
 		}

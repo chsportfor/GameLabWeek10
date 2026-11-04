@@ -92,6 +92,7 @@ private:
 	// 다중 애셋 탭 목록 및 전환 대기 메시
 	TArray<USkeletalMesh*> OpenedMeshes;
 	USkeletalMesh* MeshToSelect = nullptr;
+	FString OpenAssetMessage;
 
 	// 렌더 타깃 및 뷰포트
 	TUniquePtr<FTexture2D> ColorTarget;
