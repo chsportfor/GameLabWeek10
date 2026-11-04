@@ -144,7 +144,7 @@ void FDecalSceneProxy::BuildProjectedMesh(const FScene& Scene)
 
 					// SSD 셰이더와 같은 각도 리젝션. 표면이 Decal을 마주 보는 방향(-투영 방향)과 이루는 각도가
 					// 설정값보다 크면 옆면, 뒷면으로 보고 버린다. 넓이가 0인 삼각형도 여기서 빠진다.
-					if (NormalLength <= 0.0f || (WorldNormal | FacingDirection) < NormalThreshold * NormalLength)
+					if (NormalLength <= 0.0f || FVector::Dot(WorldNormal, FacingDirection) < NormalThreshold * NormalLength)
 					{
 						return;
 					}
