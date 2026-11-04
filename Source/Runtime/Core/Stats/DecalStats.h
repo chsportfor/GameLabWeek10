@@ -9,6 +9,8 @@ namespace DecalStats
 
     // Scene에 등록된 전체 Decal 수다.
     DECLARE_COUNTER_STAT("Decal Total", STAT_Total);
+    // 카메라 Frustum에 걸쳐 Draw 대상이 된 Decal 수다. 여러 View는 합산한다.
+    DECLARE_COUNTER_STAT("Decal Visible", STAT_Visible);
     // Fade로 건너뛴 Decal은 세지 않고, 여러 View의 Draw는 합산한다.
     DECLARE_COUNTER_STAT("Decal Draw Calls", STAT_DrawCalls);
     DECLARE_COUNTER_STAT("Decal Additive Draw Calls", STAT_AdditiveDrawCalls);

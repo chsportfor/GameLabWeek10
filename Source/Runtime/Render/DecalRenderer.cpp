@@ -7,6 +7,7 @@
 #include "Asset/AssetManager.h"
 #include "Core/Stats/DecalStats.h"
 #include "Render/DecalSettings.h"
+#include "Math/Frustum.h"
 
 
 bool FDecalRenderer::Init(FRenderer* InRenderer)
@@ -218,7 +219,20 @@ void FDecalRenderer::OnRender(
 
 	//정렬 순서 SortOrder → 텍스처 포인터 → 프록시 주소
 
-	TArray<FDecalSceneProxy*> SortDecals = Decals;
+	// 화면 밖 Decal은 픽셀은 클리핑되어도 Draw 호출과 상수 버퍼 갱신 비용이 남으므로 미리 거른다.
+	// Bounds는 Decal OBB를 감싸는 월드 AABB라 SSD와 투영 모두 같은 기준으로 쓸 수 있다.
+	const FFrustumPlanes Frustum = ExtractFrustumPlanes(ViewProjection);
+	TArray<FDecalSceneProxy*> SortDecals;
+	SortDecals.Reserve(Decals.Num());
+	for (FDecalSceneProxy* Proxy : Decals)
+	{
+		if (IsAABBInFrustum(Proxy->GetBounds(), Frustum))
+		{
+			SortDecals.Add(Proxy);
+		}
+	}
+	FStatRegistry::AddCounter(DecalStats::STAT_Visible, SortDecals.Num());
+
 	std::sort(SortDecals.begin(), SortDecals.end(), [](const FDecalSceneProxy* A, const FDecalSceneProxy* B) {
 		if (A->GetSortOrder() != B->GetSortOrder())
 		{
