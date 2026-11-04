@@ -225,6 +225,7 @@ bool UEditorEngine::Init()
 	SkeletalMeshViewerPanel = EditorUI->AddEditorPanel<FSkeletalMeshViewerPanel>();
 	SkeletalMeshViewerPanel->SetRenderer(Renderer);
 	SkeletalMeshViewerPanel->SetGridRenderer(GridRenderer.get());
+	SkeletalMeshViewerPanel->SetGizmoRenderer(GizmoRenderer.get());
 
 	if (DetailsPanel)
 	{

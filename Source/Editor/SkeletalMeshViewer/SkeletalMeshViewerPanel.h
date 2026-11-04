@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Editor/EditorUI/EditorPanel.h"
+#include "Editor/Gizmo/Gizmo.h"
+#include "Editor/Gizmo/GizmoRenderer.h"
 #include "Render/RenderingInfo.h"
 #include "Render/Renderer.h"
 #include "Render/RenderCommand.h"
@@ -22,6 +24,7 @@ public:
 
 	void SetRenderer(FRenderer* InRenderer) { Renderer = InRenderer; }
 	void SetGridRenderer(FGridRenderer* InGridRenderer) { GridRenderer = InGridRenderer; }
+	void SetGizmoRenderer(FGizmoRenderer* InGizmoRenderer) { GizmoRenderer = InGizmoRenderer; }
 
 	virtual bool Init() override;
 	virtual void Tick(float DeltaTime) override;
@@ -59,12 +62,20 @@ private:
 	void DrawLightingSettingsUI();
 	void DrawBoneNode(int32 BoneIndex, const TArray<struct FBoneInfo>& Bones);
 
+	// 1~3단계: 골격(Bone) 3D 원뿔/선 렌더링, 에디터 기즈모 연동, 실시간 스키닝 및 뷰포트 피킹
+	void ComputeBoneWorldMatrices(TArray<FMatrix>& OutBoneWorldMatrices) const;
+	void DrawSkeletonOverlay(const struct ImVec2& ViewportOrigin, const struct ImVec2& ViewportSize);
+	bool IsBoneAncestorOf(int32 AncestorIndex, int32 TargetBoneIndex, const TArray<struct FBoneInfo>& Bones) const;
+
 private:
 	FRenderer* Renderer = nullptr;
 	FGridRenderer* GridRenderer = nullptr;
+	FGizmoRenderer* GizmoRenderer = nullptr;
 
-	// 프리뷰 인스턴스 컴포넌트 (UObject 관리 대상이므로 delete하지 않음)
+	// 프리뷰 인스턴스 컴포넌트 및 본 기즈모 프록시 타깃 (UObject 관리 대상이므로 delete하지 않음)
 	USkeletalMeshComponent* PreviewComponent = nullptr;
+	USceneComponent* BoneGizmoTarget = nullptr;
+	FGizmo BoneGizmo;
 	USkeletalMesh* SelectedMesh = nullptr;
 
 	// 다중 애셋 탭 목록 및 전환 대기 메시
@@ -118,7 +129,17 @@ private:
 	bool bWireframe = false;
 	FVector4 BackgroundClearColor = FVector4(0.12f, 0.12f, 0.12f, 1.0f); // 언리얼 기본 프리뷰 배경색
 
-	// 본 트리 UI 상태
+	// 골격(Bone) 표시 및 하이라이트 옵션
+	bool bShowBones = true;
+	bool bDrawBoneCones = true;      // true: 입체 원뿔(Cone/Pyramid) 렌더링, false: 선(Line) 렌더링
+	bool bShowAllBoneNames = false;  // 모든 본 이름 표시 여부 (선택된 본은 항상 표시)
+	float BoneConeWidthRatio = 0.10f;
+	float BoneJointRadius = 4.0f;
+
+	// 본 트리 UI 및 피킹 상태
 	int32 SelectedBoneIndex = -1;
+	int32 HoveredBoneIndex = -1;
+	bool bScrollToSelectedBone = false;
 	char BoneSearchFilter[64] = "";
 };
+

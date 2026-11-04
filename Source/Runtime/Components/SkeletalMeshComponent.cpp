@@ -58,6 +58,43 @@ void USkeletalMeshComponent::ResetPoseToBindPose()
 	bSkinningDirty = true;
 }
 
+void USkeletalMeshComponent::ResetBoneToBindPose(int32 BoneIndex)
+{
+	if (!SkeletalMesh)
+		return;
+
+	const auto& Bones = SkeletalMesh->GetBones();
+	if (BoneIndex < 0 || BoneIndex >= Bones.Num() || BoneTransforms.Num() != Bones.Num())
+		return;
+
+	BoneTransforms[BoneIndex] = Bones[BoneIndex].LocalTransform;
+	UpdateSkinningMatrices();
+	bSkinningDirty = true;
+}
+
+void USkeletalMeshComponent::SetBoneLocalTransform(int32 BoneIndex, const FTransform& NewLocalTransform)
+{
+	if (BoneIndex < 0 || BoneIndex >= BoneTransforms.Num())
+		return;
+
+	BoneTransforms[BoneIndex] = NewLocalTransform;
+	UpdateSkinningMatrices();
+	bSkinningDirty = true;
+}
+
+FTransform USkeletalMeshComponent::GetBoneLocalTransform(int32 BoneIndex) const
+{
+	if (BoneIndex >= 0 && BoneIndex < BoneTransforms.Num())
+	{
+		return BoneTransforms[BoneIndex];
+	}
+	if (SkeletalMesh && BoneIndex >= 0 && BoneIndex < static_cast<int32>(SkeletalMesh->GetNumBones()))
+	{
+		return SkeletalMesh->GetBones()[BoneIndex].LocalTransform;
+	}
+	return FTransform::Identity;
+}
+
 void USkeletalMeshComponent::SetSkeletalMesh(USkeletalMesh* InSkeletalMesh)
 {
 	if (SkeletalMesh == InSkeletalMesh)
@@ -185,22 +222,46 @@ void USkeletalMeshComponent::UpdateSkinningMatrices()
 	}
 
 	TArray<FMatrix> ComponentSpaceTransforms;
+	TArray<uint8> EvalState;
 	ComponentSpaceTransforms.SetNum(BoneCount);
+	EvalState.SetNum(BoneCount);
 	SkinningMatrices.SetNum(BoneCount);
 
 	for (int32 i = 0; i < BoneCount; ++i)
 	{
-		FMatrix LocalMat = BoneTransforms[i].GetLocalMatrix();
-		const int32 ParentIdx = Bones[i].ParentIndex;
+		EvalState[i] = 0;
+	}
 
-		if (ParentIdx >= 0 && ParentIdx < i)
+	std::function<void(int32)> EvaluateBone = [&](int32 Idx)
+	{
+		if (Idx < 0 || Idx >= BoneCount || EvalState[Idx] == 2)
+			return;
+		if (EvalState[Idx] == 1)
 		{
-			ComponentSpaceTransforms[i] = LocalMat * ComponentSpaceTransforms[ParentIdx];
+			ComponentSpaceTransforms[Idx] = FMatrix::Identity;
+			EvalState[Idx] = 2;
+			return;
+		}
+
+		EvalState[Idx] = 1;
+		const FMatrix LocalMat = BoneTransforms[Idx].GetLocalMatrix();
+		const int32 ParentIdx = Bones[Idx].ParentIndex;
+
+		if (ParentIdx >= 0 && ParentIdx < BoneCount && ParentIdx != Idx)
+		{
+			EvaluateBone(ParentIdx);
+			ComponentSpaceTransforms[Idx] = LocalMat * ComponentSpaceTransforms[ParentIdx];
 		}
 		else
 		{
-			ComponentSpaceTransforms[i] = LocalMat;
+			ComponentSpaceTransforms[Idx] = LocalMat;
 		}
+		EvalState[Idx] = 2;
+	};
+
+	for (int32 i = 0; i < BoneCount; ++i)
+	{
+		EvaluateBone(i);
 
 		if (i < InvBindMatrices.Num())
 		{

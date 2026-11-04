@@ -37,6 +37,9 @@ public:
 	virtual FOutlineGeometry GetOutlineGeometry() override;
 
 	void ResetPoseToBindPose();
+	void ResetBoneToBindPose(int32 BoneIndex);
+	void SetBoneLocalTransform(int32 BoneIndex, const FTransform& NewLocalTransform);
+	FTransform GetBoneLocalTransform(int32 BoneIndex) const;
 	void UpdateSkinningMatrices();
 	void MarkSkinningDirty() { bSkinningDirty = true; }
 	const TArray<FTransform>& GetBoneTransforms() const { return BoneTransforms; }
