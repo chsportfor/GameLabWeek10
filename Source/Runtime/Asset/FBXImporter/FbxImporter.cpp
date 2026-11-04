@@ -476,7 +476,7 @@ void FFbxImporter::BuildMeshVerticesAndIndices(FbxMesh* Mesh,const TMap<int32, F
 					bool bSuccess = Mesh->GetPolygonVertexUV(i, j, UVSetNames.GetStringAt(0), UV, bUnmapped);
 					if (bSuccess && !bUnmapped)
 					{
-						Vertex.UV = FVector2(static_cast<float>(UV[0]), static_cast<float>(UV[1]));
+						Vertex.UV = FVector2(static_cast<float>(UV[0]), 1.0f - static_cast<float>(UV[1]));
 					}
 				}
 
