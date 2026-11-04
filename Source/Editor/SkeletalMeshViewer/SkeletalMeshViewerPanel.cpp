@@ -201,6 +201,75 @@ void FSkeletalMeshViewerPanel::SetPreviewSampler(int32 SlotIndex, ESamplerState 
 	Material->SamplerState = Sampler;
 }
 
+bool FSkeletalMeshViewerPanel::SaveCurrentMesh()
+{
+	if (!SelectedMesh)
+	{
+		SaveStatusMessage = "No skeletal mesh selected.";
+		SaveStatusTimer = 3.0f;
+		return false;
+	}
+
+	// 1. PreviewComponent에서 수정한 본의 현재 LocalTransform들을 SelectedMesh->MeshData.Bones에 반영
+	// 주의: Mesh.Vertices는 원본 FBX 바인드 공간 정점이므로 InverseBindPoseMat은 원본을 유지해야
+	// ResetPoseToBindPose() -> UpdateSkinning() 시 정점들이 수정된 본 위치를 따라 스키닝된다.
+	if (PreviewComponent)
+	{
+		const int32 NumBones = SelectedMesh->MeshData.Bones.Num();
+		for (int32 BoneIdx = 0; BoneIdx < NumBones; ++BoneIdx)
+		{
+			if (const FTransform* CurTf = PreviewComponent->GetBoneLocalTransform(BoneIdx))
+			{
+				SelectedMesh->MeshData.Bones[BoneIdx].RefPoseTransform = *CurTf;
+			}
+		}
+	}
+
+	// 2. AssetManager를 통해 .bin 파일 저장 및 씬 컴포넌트(레벨 에디터 및 프리뷰) 즉시 갱신
+	if (UAssetManager::Get().SaveSkeletalMesh(SelectedMesh))
+	{
+		if (PreviewComponent)
+		{
+			PreviewComponent->ResetPoseToBindPose();
+		}
+		PreviewBounds = CalculatePreviewBounds();
+		SaveStatusMessage = "Saved to .bin successfully!";
+		SaveStatusTimer = 3.5f;
+		return true;
+	}
+	else
+	{
+		SaveStatusMessage = "Failed to save to .bin.";
+		SaveStatusTimer = 3.5f;
+		return false;
+	}
+}
+
+void FSkeletalMeshViewerPanel::ResetAllBonesToBindPose()
+{
+	if (PreviewComponent)
+	{
+		PreviewComponent->ResetPoseToBindPose();
+		TArray<FMatrix> BoneMatrices;
+		ComputeBoneWorldMatrices(BoneMatrices);
+		if (SelectedBoneIndex >= 0 && SelectedBoneIndex < BoneMatrices.Num() && BoneGizmoTarget)
+		{
+			const FMatrix& BoneMat = BoneMatrices[SelectedBoneIndex];
+			const FVector BoneWorldPos(BoneMat.M[3][0], BoneMat.M[3][1], BoneMat.M[3][2]);
+			FMatrix BoneRotMat = FMatrix::Identity;
+			BoneRotMat.SetAxis(0, FVector(BoneMat.M[0][0], BoneMat.M[0][1], BoneMat.M[0][2]).GetSafeNormal());
+			BoneRotMat.SetAxis(1, FVector(BoneMat.M[1][0], BoneMat.M[1][1], BoneMat.M[1][2]).GetSafeNormal());
+			BoneRotMat.SetAxis(2, FVector(BoneMat.M[2][0], BoneMat.M[2][1], BoneMat.M[2][2]).GetSafeNormal());
+
+			BoneGizmoTarget->SetRelativeLocation(BoneWorldPos);
+			BoneGizmoTarget->SetRelativeRotation(MatrixToRotator(BoneRotMat));
+			BoneGizmoTarget->SetRelativeScale3D(GetBoneLocalTransform(SelectedBoneIndex).Scale);
+		}
+		SaveStatusMessage = "Reset all bones to bind pose.";
+		SaveStatusTimer = 2.5f;
+	}
+}
+
 void FSkeletalMeshViewerPanel::FocusOnMesh()
 {
 	if (!SelectedMesh)
@@ -328,6 +397,15 @@ void FSkeletalMeshViewerPanel::Tick(float DeltaTime)
 	if (!IsOpen())
 		return;
 
+	if (SaveStatusTimer > 0.0f)
+	{
+		SaveStatusTimer -= DeltaTime;
+		if (SaveStatusTimer <= 0.0f)
+		{
+			SaveStatusMessage.clear();
+		}
+	}
+
 	if (PreviewComponent)
 	{
 		PreviewComponent->TickComponent(DeltaTime);
@@ -357,9 +435,13 @@ void FSkeletalMeshViewerPanel::HandleInput(float DeltaTime)
 	if (!bViewportHovered && !bIsInteracting)
 		return;
 
-	// 1. 단축키 'F': 포커스 맞추기, W/E/R/Space: 기즈모 모드 전환 (우클릭 카메라 조작 중이 아닐 때)
+	// 1. 단축키 'F': 포커스 맞추기, W/E/R/Space: 기즈모 모드 전환, Ctrl+S: 저장 (우클릭 카메라 조작 중이 아닐 때)
 	if (!IO.WantTextInput && !bRightMouseDown && !IO.KeyAlt)
 	{
+		if (IO.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false))
+		{
+			SaveCurrentMesh();
+		}
 		if (ImGui::IsKeyPressed(ImGuiKey_F))
 		{
 			FocusOnMesh();
@@ -1383,6 +1465,19 @@ void FSkeletalMeshViewerPanel::DrawToolbarUI()
 		// 1. 메시 추가 메뉴
 		if (ImGui::BeginMenu("Mesh"))
 		{
+			if (SelectedMesh)
+			{
+				if (ImGui::MenuItem("Save Asset (.bin)", "Ctrl+S"))
+				{
+					SaveCurrentMesh();
+				}
+				if (ImGui::MenuItem("Reset All Bones to Bind Pose"))
+				{
+					ResetAllBonesToBindPose();
+				}
+				ImGui::Separator();
+			}
+
 			for (TObjectIterator<USkeletalMesh> Itr; Itr; ++Itr)
 			{
 				USkeletalMesh* Mesh = *Itr;
@@ -1447,6 +1542,26 @@ void FSkeletalMeshViewerPanel::DrawToolbarUI()
 				bPreviewSettingsOpen = true;
 			}
 			ImGui::EndMenu();
+		}
+
+		// 4. 빠른 저장 버튼 및 상태 표시
+		if (SelectedMesh)
+		{
+			ImGui::Separator();
+			if (ImGui::Button("Save Asset"))
+			{
+				SaveCurrentMesh();
+			}
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("Save modified bone transforms to .bin file (Ctrl+S)");
+			}
+
+			if (SaveStatusTimer > 0.0f)
+			{
+				ImGui::SameLine();
+				ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1.0f), "%s", SaveStatusMessage.c_str());
+			}
 		}
 
 		ImGui::EndMenuBar();
@@ -1535,6 +1650,30 @@ void FSkeletalMeshViewerPanel::DrawMeshDetailsUI()
 				++SlotIndex;
 			}
 		}
+	}
+
+	ImGui::Spacing();
+	ImGui::Separator();
+	ImGui::Spacing();
+	ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1.0f), "--- Pose Actions ---");
+	if (ImGui::Button("Save Mesh (Apply Ref Pose to .bin)", ImVec2(-1.0f, 26.0f)))
+	{
+		SaveCurrentMesh();
+	}
+	if (ImGui::IsItemHovered())
+	{
+		ImGui::SetTooltip("Save current modified bone poses as new bind pose and bake to .bin (Ctrl+S)");
+	}
+
+	if (ImGui::Button("Reset All Bones to Bind Pose", ImVec2(-1.0f, 24.0f)))
+	{
+		ResetAllBonesToBindPose();
+	}
+
+	if (SaveStatusTimer > 0.0f)
+	{
+		ImGui::Spacing();
+		ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1.0f), "%s", SaveStatusMessage.c_str());
 	}
 }
 
@@ -1735,6 +1874,11 @@ void FSkeletalMeshViewerPanel::DrawBoneHierarchyUI()
 		{
 			SelectedBoneIndex = -1;
 			BoneGizmo.SetTarget(nullptr, false);
+		}
+		ImGui::Spacing();
+		if (ImGui::Button("Save Mesh (Ctrl+S)", ImVec2(-1.0f, 24.0f)))
+		{
+			SaveCurrentMesh();
 		}
 	}
 	else

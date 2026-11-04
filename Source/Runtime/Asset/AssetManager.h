@@ -77,6 +77,9 @@ public:
 
 	FLODGenerateResult GenerateStaticMeshLODs(UStaticMesh& Mesh,const FLODGenerateRequest& Request);
 
+	// USkeletalMesh의 현재 MeshData(수정된 RefPose 및 InverseBindPoseMat)를 디스크의 .bin 캐시 파일에 저장하고 등록된 에셋 및 씬 컴포넌트를 갱신한다.
+	bool SaveSkeletalMesh(USkeletalMesh* Mesh);
+
 	// 원본 좌표축이 엔진과 다른 메시를 로드 후 돌린다 (정점·법선·AABB·삼각형 BVH·GPU 정점 버퍼를 다시 만든다).
 	// LOD는 LOD0에서 만들어지므로 LOD를 만들기 전에만 부를 수 있다. Rotate는 회전(길이·손잡이 보존)이어야 한다.
 	static bool ReorientStaticMesh(UStaticMesh& Mesh, const std::function<FVector(const FVector&)>& Rotate);

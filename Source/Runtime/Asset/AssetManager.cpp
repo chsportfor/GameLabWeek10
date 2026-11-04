@@ -12,9 +12,11 @@
 #include "Asset/ObjImporter/ObjImporter.h"
 #include "Asset/FBXImporter/FbxImporter.h"
 #include "Asset/FBXImporter/SkeletalMeshBake.h"
+#include "Components/SkinnedMeshComponent.h"
 
 #include "Render/GeometryGenerator.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/UObjectIterator.h"
 
 #include "Render/ImageLoader.h"
 #include "Core/ResourcePaths.h"
@@ -629,6 +631,60 @@ const FFbxAssetSet* UAssetManager::LoadFbxAssets(const FString& Path)
 
 	FbxAssets.Add(Key, std::move(Assets));
 	return FbxAssets.Find(Key);
+}
+
+bool UAssetManager::SaveSkeletalMesh(USkeletalMesh* Mesh)
+{
+	if (!Mesh || Mesh->MeshData.Meshes.IsEmpty())
+	{
+		HTR_LOG(Warning, "[FBX] Cannot save empty skeletal mesh");
+		return false;
+	}
+
+	fs::path SourceFile = Mesh->GetPath();
+	if (!fs::exists(SourceFile))
+	{
+		SourceFile = fs::path("Assets") / SourceFile;
+	}
+
+	if (!fs::exists(SourceFile))
+	{
+		HTR_LOG(Error, "[FBX] Cannot save: Source FBX file does not exist: {}", Mesh->GetPath());
+		return false;
+	}
+
+	std::error_code Error;
+	const auto SourceTime = fs::last_write_time(SourceFile, Error);
+	if (Error)
+	{
+		HTR_LOG(Error, "[FBX] Cannot get last write time for: {}", SourceFile.string());
+		return false;
+	}
+
+	const FString SourcePath = ToUTF8String(SourceFile);
+
+	// 기존 캐시된 FBX 데이터(동일 FBX 내의 스태틱 메시 등)를 보존하기 위해 기존 .bin 데이터 읽기
+	FFbxCookedData CookedData;
+	FSkeletalMeshBake::ReadBaked(SourcePath, std::nullopt, CookedData);
+	CookedData.SkeletalMesh = Mesh->MeshData;
+
+	// 디스크의 .bin 바이너리 파일로 직렬화하여 영구 저장
+	FSkeletalMeshBake::WriteBaked(SourcePath, SourceTime, CookedData);
+
+	// 현재 씬에 배치된 모든 스켈레탈 메시 컴포넌트들을 새로운 RefPose 및 스키닝에 맞춰 갱신
+	for (TObjectIterator<USkinnedMeshComponent> Itr; Itr; ++Itr)
+	{
+		USkinnedMeshComponent* Comp = *Itr;
+		if (Comp && Comp->GetSkeletalMesh() == Mesh)
+		{
+			Comp->ResetPoseToBindPose();
+			Comp->MarkRenderStateDirty();
+		}
+	}
+
+	Mesh->RebuildRenderData();
+	HTR_LOG(Info, "[FBX] Skeletal mesh successfully saved: {}.bin", SourcePath);
+	return true;
 }
 
 

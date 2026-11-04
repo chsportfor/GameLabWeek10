@@ -47,6 +47,10 @@ public:
 
 	void RequestFocus() { bNeedFocus = true; }
 
+	// 현재 프리뷰에서 수정한 본 Transform을 RefPose로 확정하고 .bin 파일에 저장
+	bool SaveCurrentMesh();
+	void ResetAllBonesToBindPose();
+
 private:
 	void ResizeViewport(uint32 NewWidth, uint32 NewHeight);
 	FBox CalculatePreviewBounds() const;
@@ -157,4 +161,8 @@ private:
 	int32 HoveredBoneIndex = -1;
 	bool bScrollToSelectedBone = false;
 	char BoneSearchFilter[64] = "";
+
+	// 저장 상태 알림 메시지 및 타이머
+	FString SaveStatusMessage;
+	float SaveStatusTimer = 0.0f;
 };
