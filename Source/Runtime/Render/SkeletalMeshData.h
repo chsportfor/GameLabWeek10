@@ -14,7 +14,7 @@ struct FSkeletalVertex
 	FVector2 UV;
 
 	// 일반적으로 한 정점에 최대 4개(혹은 8개)의 본이 영향을 준다
-	uint8 BoneIndices[4] = { 0, 0, 0, 0 };         // 영향을 주는 본들의 번호
+	uint16 BoneIndices[4] = { 0, 0, 0, 0 };        // 영향을 주는 본들의 번호 (최대 65,535개 본 지원)
 	float BoneWeights[4] = { 0.f, 0.f, 0.f, 0.f }; // 각 본의 영향력 - 합이 1.0이 되도록 정규화
 };
 

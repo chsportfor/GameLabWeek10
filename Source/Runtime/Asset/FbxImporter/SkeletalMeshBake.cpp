@@ -8,7 +8,7 @@
 #include "Render/SkeletalMeshData.h"
 #include "Core/EngineLog.h"
 
-static_assert(sizeof(FSkeletalVertex) == 64);
+static_assert(sizeof(FSkeletalVertex) == 68);
 static_assert(std::is_trivially_copyable_v<FSkeletalVertex>);
 static_assert(std::is_trivially_copyable_v<FSkelMeshSection>);
 static_assert(sizeof(FMatrix) == 64);
@@ -17,7 +17,7 @@ static_assert(std::is_trivially_copyable_v<FBox>);
 
 namespace
 {
-	constexpr uint32 SkeletalBakeVersion{ 3 };
+	constexpr uint32 SkeletalBakeVersion{ 4 };
 
 	struct FBakeHeader
 	{

@@ -1003,7 +1003,7 @@ bool FFbxImporter::ProcessGeometry(fbxsdk::FbxScene* Scene, FSkeletalMeshData& O
 				{
 					if (b < MaxBones && TotalWeight > 0.0001f)
 					{
-						Vertex.BoneIndices[b] = static_cast<uint8>(Influences[b].BoneIndex);
+						Vertex.BoneIndices[b] = static_cast<uint16>(Influences[b].BoneIndex);
 						Vertex.BoneWeights[b] = Influences[b].Weight / TotalWeight;
 					}
 					else

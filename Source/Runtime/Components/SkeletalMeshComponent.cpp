@@ -303,7 +303,7 @@ void USkeletalMeshComponent::DeformVerticesCPU()
 			{
 				continue;
 			}
-			const uint8 BoneIndex = SrcVertex.BoneIndices[j];
+			const uint16 BoneIndex = SrcVertex.BoneIndices[j];
 			const FMatrix& SkinningMat = (BoneIndex < NumSkinningMats) ? SkinningMatrices[BoneIndex] : FMatrix::Identity;
 
 			DeformedPosition += SkinningMat.TransformPosition(SrcVertex.Position) * Weight;

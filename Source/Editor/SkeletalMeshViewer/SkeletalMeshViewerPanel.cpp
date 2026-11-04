@@ -1227,48 +1227,7 @@ void FSkeletalMeshViewerPanel::DrawToolbarUI()
 			ImGui::EndMenu();
 		}
 
-		// 3. 골격(Skeleton) 및 기즈모 옵션 메뉴
-		if (ImGui::BeginMenu("Skeleton"))
-		{
-			ImGui::MenuItem("Show Bones", nullptr, &bShowBones);
-			if (ImGui::MenuItem("Style: 3D Cone (Pyramid)", nullptr, bDrawBoneCones))
-			{
-				bDrawBoneCones = true;
-			}
-			if (ImGui::MenuItem("Style: Line", nullptr, !bDrawBoneCones))
-			{
-				bDrawBoneCones = false;
-			}
-			ImGui::Separator();
-			if (ImGui::MenuItem("Gizmo: Rotate (E)", nullptr, BoneGizmo.GetMode() == EGizmoMode::Rotation))
-			{
-				BoneGizmo.SetMode(EGizmoMode::Rotation);
-			}
-			if (ImGui::MenuItem("Gizmo: Translate (W)", nullptr, BoneGizmo.GetMode() == EGizmoMode::Location))
-			{
-				BoneGizmo.SetMode(EGizmoMode::Location);
-			}
-			if (ImGui::MenuItem("Gizmo: Scale (R)", nullptr, BoneGizmo.GetMode() == EGizmoMode::Scale))
-			{
-				BoneGizmo.SetMode(EGizmoMode::Scale);
-			}
-			ImGui::Separator();
-			if (ImGui::MenuItem("Space: Local", nullptr, BoneGizmo.GetSpace() == EGizmoSpace::Local))
-			{
-				BoneGizmo.SetSpace(EGizmoSpace::Local);
-			}
-			if (ImGui::MenuItem("Space: World", nullptr, BoneGizmo.GetSpace() == EGizmoSpace::World))
-			{
-				BoneGizmo.SetSpace(EGizmoSpace::World);
-			}
-			ImGui::Separator();
-			ImGui::MenuItem("Show All Bone Names", nullptr, &bShowAllBoneNames);
-			ImGui::SliderFloat("Cone Width", &BoneConeWidthRatio, 0.03f, 0.30f, "%.2f");
-			ImGui::SliderFloat("Joint Size", &BoneJointRadius, 2.0f, 10.0f, "%.1f px");
-			ImGui::EndMenu();
-		}
-
-		// 4. 윈도우 메뉴
+		// 3. 윈도우 메뉴
 		if (ImGui::BeginMenu("Window"))
 		{
 			ImGui::MenuItem("Skeletal Mesh Viewport", nullptr, &bViewportOpen);
@@ -1286,31 +1245,6 @@ void FSkeletalMeshViewerPanel::DrawToolbarUI()
 			}
 			ImGui::EndMenu();
 		}
-
-		ImGui::Separator();
-
-		if (ImGui::Button("Focus (F)"))
-		{
-			FocusOnMesh();
-		}
-
-		ImGui::SameLine();
-		if (ImGui::Button("Reset Bind Pose"))
-		{
-			if (PreviewComponent)
-			{
-				PreviewComponent->ResetPoseToBindPose();
-			}
-		}
-
-		ImGui::SameLine();
-		ImGui::Checkbox("Grid", &bShowGrid);
-
-		ImGui::SameLine();
-		ImGui::Checkbox("Wireframe", &bWireframe);
-
-		ImGui::SameLine();
-		ImGui::Checkbox("Bones", &bShowBones);
 
 		ImGui::EndMenuBar();
 	}
@@ -1454,7 +1388,7 @@ void FSkeletalMeshViewerPanel::DrawBoneHierarchyUI()
 	ImGui::InputTextWithHint("##BoneFilter", "Search bone name...", BoneSearchFilter, sizeof(BoneSearchFilter));
 
 	const float FooterHeight = (SelectedBoneIndex >= 0 && SelectedBoneIndex < Bones.Num())
-		? ImGui::GetFrameHeightWithSpacing() * 8.6f
+		? ImGui::GetFrameHeightWithSpacing() * 10.6f
 		: ImGui::GetFrameHeightWithSpacing() * 1.5f;
 
 	ImGui::BeginChild("BoneHierarchyScroll", ImVec2(0, -FooterHeight), true);
@@ -1531,15 +1465,14 @@ void FSkeletalMeshViewerPanel::DrawBoneHierarchyUI()
 			}
 		}
 
-		if (ImGui::Button("Reset Bone", ImVec2(95.0f, 0.0f)))
+		if (ImGui::Button("Reset Bone", ImVec2(-1.0f, 0.0f)))
 		{
 			if (PreviewComponent)
 			{
 				PreviewComponent->ResetBoneToBindPose(SelectedBoneIndex);
 			}
 		}
-		ImGui::SameLine();
-		if (ImGui::Button("Focus Bone", ImVec2(95.0f, 0.0f)))
+		if (ImGui::Button("Focus Bone", ImVec2(-1.0f, 0.0f)))
 		{
 			TArray<FMatrix> BoneMatrices;
 			ComputeBoneWorldMatrices(BoneMatrices);
@@ -1551,8 +1484,7 @@ void FSkeletalMeshViewerPanel::DrawBoneHierarchyUI()
 				CameraLocation = TargetPosition - Rot.Quaternion().GetForwardVector() * CameraDistance;
 			}
 		}
-		ImGui::SameLine();
-		if (ImGui::Button("Deselect", ImVec2(80.0f, 0.0f)))
+		if (ImGui::Button("Deselect", ImVec2(-1.0f, 0.0f)))
 		{
 			SelectedBoneIndex = -1;
 			BoneGizmo.SetTarget(nullptr, false);
@@ -1604,20 +1536,24 @@ void FSkeletalMeshViewerPanel::DrawLightingSettingsUI()
 		{
 			BoneGizmo.SetSpace(EGizmoSpace::World);
 		}
-
-		if (ImGui::Button("Reset All Bones to Bind Pose", ImVec2(-1.0f, 24.0f)))
-		{
-			if (PreviewComponent)
-			{
-				PreviewComponent->ResetPoseToBindPose();
-			}
-		}
 	}
 
 	if (ImGui::CollapsingHeader("Skeleton Display", ImGuiTreeNodeFlags_DefaultOpen))
 	{
 		ImGui::Checkbox("Show Bones", &bShowBones);
-		ImGui::Checkbox("3D Cone Style (Uncheck for Lines)", &bDrawBoneCones);
+
+		ImGui::Text("Bone Style:");
+		ImGui::SameLine();
+		if (ImGui::RadioButton("3D Cone", bDrawBoneCones))
+		{
+			bDrawBoneCones = true;
+		}
+		ImGui::SameLine();
+		if (ImGui::RadioButton("Line", !bDrawBoneCones))
+		{
+			bDrawBoneCones = false;
+		}
+
 		ImGui::Checkbox("Show All Bone Names", &bShowAllBoneNames);
 		if (bDrawBoneCones)
 		{
