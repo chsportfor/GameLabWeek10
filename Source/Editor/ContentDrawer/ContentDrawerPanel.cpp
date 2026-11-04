@@ -3,6 +3,7 @@
 #include "Asset/AssetManager.h"
 #include "Text/Font.h"
 #include "Editor/HitoriEd/EditorDragDrop.h"
+#include "Editor/Subsystems/AssetEditorSubsystem.h"
 
 namespace
 {
@@ -157,6 +158,14 @@ void FContentDrawerPanel::OnRender()
 					if (bIsDirectory)
 					{
 						CurrentPath /= Path.filename(); // 하위 폴더로 이동
+					}
+					else if (OnOpenAsset)
+					{
+						OnOpenAsset(PathString);
+					}
+					else
+					{
+						FAssetEditorSubsystem::Get().OpenAsset(PathString);
 					}
 				}
 				// 파일 이름 표시

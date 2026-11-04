@@ -13,6 +13,7 @@
 
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "Editor/Subsystems/AssetEditorSubsystem.h"
 
 #include <algorithm>
 #include <cmath>
@@ -26,6 +27,7 @@ FSkeletalMeshViewerPanel::FSkeletalMeshViewerPanel()
 
 FSkeletalMeshViewerPanel::~FSkeletalMeshViewerPanel()
 {
+	FAssetEditorSubsystem::Get().UnregisterHandler(".fbx");
 	PreviewComponent = nullptr;
 	BoneGizmoTarget = nullptr;
 }
@@ -42,6 +44,16 @@ bool FSkeletalMeshViewerPanel::Init()
 
 	// 기본 상태: 닫혀 있음 (Window 메뉴 또는 Details 패널의 Edit 버튼으로 오픈)
 	SetOpen(false);
+
+	// .fbx 확장자 에셋 오픈 핸들러 등록
+	FAssetEditorSubsystem::Get().RegisterHandler(".fbx", [this](const FString& AssetPath)
+	{
+		USkeletalMesh* Mesh = UAssetManager::LoadFbxSkeletalMesh(AssetPath);
+		if (Mesh)
+		{
+			this->OpenMesh(Mesh);
+		}
+	});
 
 	return true;
 }
